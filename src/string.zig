@@ -222,7 +222,9 @@ fn cloneArrayList(a: std.mem.Allocator, T: type, source: std.ArrayList(T)) !std.
     if (std.meta.hasMethod(T, "clone")) {
         if (hasParameter(T, "clone", std.mem.Allocator, 1)) {
             for (source.items) |item| {
-                try clone.append(a, item.clone(a));
+                //TODO: Check for constness
+                var item_ptr: *T = @constCast(&item);
+                try clone.append(a, item_ptr.clone(a));
             }
         } else {
             for (source.items) |item| {
@@ -235,7 +237,7 @@ fn cloneArrayList(a: std.mem.Allocator, T: type, source: std.ArrayList(T)) !std.
     return clone;
 }
 
-fn hasParameter(T: type, method: []const u8, P: type, position: usize) bool {
+fn hasParameter(comptime T: type, comptime method: []const u8, comptime P: type, comptime position: usize) bool {
     if (!std.meta.hasMethod(T, method)) return false;
     const method_type = @TypeOf(@field(T, method));
     const fn_info = @typeInfo(method_type).@"fn";
@@ -245,7 +247,18 @@ fn hasParameter(T: type, method: []const u8, P: type, position: usize) bool {
     return true;
 }
 
-test "cloneArrayList" {
+const testStruct = struct {
+    const Self = @This();
+
+    inner: usize,
+
+    pub fn clone(s: *Self, a: std.mem.Allocator) Self {
+        _ = a;
+        return Self{ .inner = s.inner };
+    }
+};
+
+test "cloneArrayList u8" {
     const a = std.testing.allocator;
     var list: std.ArrayList(u8) = .empty;
     defer list.deinit(a);
@@ -256,4 +269,32 @@ test "cloneArrayList" {
     try std.testing.expectEqual(5, copy.items[0]);
 }
 
-test "hasParameter" {}
+test "cloneArrayList []const u8" {
+    const T = []const u8;
+    const a = std.testing.allocator;
+    var list: std.ArrayList(T) = .empty;
+    defer list.deinit(a);
+    try list.append(a, "testEntry");
+    var copy = try cloneArrayList(std.testing.allocator, T, list);
+    defer copy.deinit(a);
+    try std.testing.expectEqual(1, copy.items.len);
+    try std.testing.expectEqual("testEntry", copy.items[0]);
+}
+
+test "cloneArrayList struct" {
+    const T = testStruct;
+    const a = std.testing.allocator;
+    var list: std.ArrayList(T) = .empty;
+    defer list.deinit(a);
+    try list.append(a, testStruct{ .inner = 523 });
+    var copy = try cloneArrayList(std.testing.allocator, T, list);
+    defer copy.deinit(a);
+    try std.testing.expectEqual(1, copy.items.len);
+    try std.testing.expectEqualStrings(testStruct{ .inner = 523 }, copy.items[0]);
+}
+
+test "hasParameter" {
+    try std.testing.expect(hasParameter(testStruct, "clone", std.mem.Allocator, 1));
+
+    try std.testing.expect(!hasParameter(u8, "clone", std.mem.Allocator, 0));
+}
