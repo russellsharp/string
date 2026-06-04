@@ -1,6 +1,5 @@
 const std = @import("std");
-
-var asdf: string(u8) = .init(std.testing.allocator);
+const clone = @import("clone.zig");
 
 const StringErrors = error{ InvalidArgument, EmptyString };
 
@@ -12,22 +11,20 @@ pub fn string(T: type) type {
 
         a: std.mem.Allocator,
         i: std.ArrayList(T) = .empty,
-        inner: ?[]T = null,
-
-        pub const empty = "";
+        raw: ?[]T = null,
 
         pub fn init(a: std.mem.Allocator, initial: ?[]const T) Self {
             var s = Self{
                 .a = a,
                 .i = std.ArrayList(T).empty,
             };
-            if (initial) |value| s.append(value) catch unreachable;
+            if (initial) |value| _ = s.set(value);
             return s;
         }
 
         pub fn deinit(s: *Self) void {
             s.i.deinit(s.a);
-            if (s.inner) |in| s.a.free(in);
+            if (s.raw) |in| s.a.free(in);
         }
 
         pub fn clone(s: Self) Self {
@@ -35,18 +32,20 @@ pub fn string(T: type) type {
                 .a = s.a,
                 .i = std.ArrayList.empty,
             };
-            c.inner = s.a.dupe(s.inner);
+            c.raw = s.a.dupe(s.raw);
             c.i = s.i.clone(s.a);
         }
 
-        pub fn append(s: *Self, suffix: []const T) !void {
+        pub fn append(s: *Self, suffix: []const T) !*Self {
             try s.i.appendSlice(s.a, suffix);
+            return s;
         }
 
+        //caller gets a newly allocated []const T that they must free
         pub fn str(s: *Self) ![]T {
-            if (s.inner) |previous| s.a.free(previous);
-            s.inner = try s.a.dupe(T, s.i.items);
-            return s.inner.?;
+            if (s.raw) |previous| s.a.free(previous);
+            s.raw = try s.a.dupe(T, s.i.items);
+            return s.raw.?;
         }
 
         pub fn trimRight(s: *Self, charactersToTrim: []const T) ![]T {
@@ -87,10 +86,7 @@ pub fn string(T: type) type {
             const trimmed = try s.a.dupe(T, s.i.items[first .. s.i.items.len - 1]);
             defer s.a.free(trimmed);
 
-            s.i.clearAndFree(s.a);
-            try s.i.appendSlice(s.a, trimmed);
-
-            return s.str();
+            return s.set(trimmed).str();
         }
 
         pub fn trim(s: *Self, charactersToTrim: []const T) ![]T {
@@ -122,10 +118,41 @@ pub fn string(T: type) type {
             const trimmed = try s.a.dupe(T, s.i.items[first..last]);
             defer s.a.free(trimmed);
 
-            s.i.clearAndFree(s.a);
-            try s.i.appendSlice(s.a, trimmed);
+            return s.set(trimmed).str();
+        }
 
-            return s.str();
+        pub fn substr(s: *Self, index: usize, count: usize) ![]T {
+            if (count > s.i.items.len) return StringErrors.InvalidArgument;
+
+            var i: usize = index;
+            var subList: std.ArrayList(T) = .empty;
+            while (i < s.i.items.len and i < count) : (i += 1) {
+                try subList.append(s.a, s.i.items[i]);
+            }
+
+            const subString = try subList.toOwnedSlice(s.a);
+            defer s.a.free(subString);
+
+            return s.set(subString).str();
+        }
+
+        pub fn length(s: *Self) usize {
+            return s.i.items.len;
+        }
+
+        pub fn is_empty(s: *Self) bool {
+            return s.i.items.len == 0;
+        }
+
+        pub fn clear(s: *Self) *Self {
+            return s.set(empty);
+        }
+
+        fn set(s: *Self, new: []const T) *Self {
+            s.i.clearAndFree(s.a);
+            s.i.appendSlice(s.a, new) catch unreachable;
+            _ = s.str() catch unreachable;
+            return s;
         }
     };
 }
@@ -150,10 +177,10 @@ test "empty string" {
 test "append" {
     var str = string(u8).init(std.testing.allocator, empty);
     defer str.deinit();
-    try str.append("hi");
+    _ = try str.append("hi");
     try std.testing.expectEqualStrings("hi", try str.str());
 
-    try str.append("hi");
+    _ = try str.append("hi");
     try std.testing.expectEqualStrings("hihi", try str.str());
 }
 
@@ -185,13 +212,53 @@ test "trim" {
     try std.testing.expectEqualStrings("star\r\nting", trimmed);
 }
 
-test "substr(index, length)" {}
+test "substr(index, length)" {
+    var str_0 = string(u8).init(std.testing.allocator, "01234567");
+    defer str_0.deinit();
+    const sub = try str_0.substr(0, 5);
+    try std.testing.expectEqualStrings("01234", sub);
 
-test "length" {}
+    var str_1 = string(u8).init(std.testing.allocator, "01234567");
+    defer str_1.deinit();
+    const sub_short = try str_1.substr(0, 8);
+    try std.testing.expectEqualStrings("01234567", sub_short);
 
-test "empty" {}
+    var str_2 = string(u8).init(std.testing.allocator, "01234567");
+    defer str_2.deinit();
+    const sub_beyond = try str_2.substr(55, 8);
+    try std.testing.expectEqualStrings(empty, sub_beyond);
+}
 
-test "clear" {}
+test "length" {
+    var str_0 = string(u8).init(std.testing.allocator, empty);
+    defer str_0.deinit();
+
+    try std.testing.expectEqual(0, str_0.length());
+
+    _ = try str_0.append("1234567");
+    try std.testing.expectEqual(7, str_0.length());
+}
+
+test "is_empty" {
+    var str_0 = string(u8).init(std.testing.allocator, empty);
+    defer str_0.deinit();
+
+    try std.testing.expectEqual(0, str_0.length());
+    try std.testing.expect(str_0.is_empty());
+}
+
+test "clear" {
+    var str_0 = string(u8).init(std.testing.allocator, "content for your pleasure");
+    defer str_0.deinit();
+
+    try std.testing.expectEqual("content for your pleasure".len, str_0.length());
+    try std.testing.expect(!str_0.is_empty());
+
+    _ = str_0.clear();
+
+    try std.testing.expectEqual(0, str_0.length());
+    try std.testing.expect(str_0.is_empty());
+}
 
 test "resize" {}
 
@@ -216,150 +283,3 @@ test "fromWriter" {}
 test "fromSlice" {}
 
 test "fromArrayList" {}
-
-fn cloneArrayList(a: std.mem.Allocator, T: type, source: std.ArrayList(T)) !std.ArrayList(T) {
-    var clone: std.ArrayList(T) = .empty;
-    if (comptime std.meta.hasMethod(T, "clone")) {
-        if (comptime hasParameter(T, "clone", std.mem.Allocator, 1)) {
-            clone = try cloneListA(a, T, source);
-        } else {
-            clone = try cloneList(a, T, source);
-        }
-    } else {
-        clone = try source.clone(a);
-    }
-    return clone;
-}
-
-fn hasParameter(comptime T: type, comptime method: []const u8, comptime P: type, comptime position: usize) bool {
-    if (!std.meta.hasMethod(T, method)) return false;
-
-    const method_type = @TypeOf(@field(T, method));
-    const fn_info = @typeInfo(method_type).@"fn";
-
-    if (fn_info.params.len < position + 1) return false;
-    if (fn_info.params[position].type != P) return false;
-
-    return true;
-}
-
-pub fn cloneListA(a: std.mem.Allocator, T: type, source: std.ArrayList(T)) !std.ArrayList(T) {
-    var copy: std.ArrayList(T) = .empty;
-    for (source.items) |item| {
-        var item_clone = item;
-        try copy.append(a, item_clone.clone(a));
-    }
-    return copy;
-}
-
-pub fn cloneList(a: std.mem.Allocator, T: type, source: std.ArrayList(T)) !std.ArrayList(T) {
-    var copy: std.ArrayList(T) = .empty;
-    for (source.items) |item| {
-        var item_clone = item;
-        try copy.append(a, item_clone.clone());
-    }
-    return copy;
-}
-
-const testStructClone = struct {
-    const Self = @This();
-
-    inner: usize,
-
-    pub fn clone(s: *Self, a: std.mem.Allocator) Self {
-        _ = a;
-        return Self{ .inner = s.inner };
-    }
-};
-
-const testStructCloneNoAllocator = struct {
-    const Self = @This();
-
-    inner: usize,
-
-    pub fn clone(s: *Self) Self {
-        return Self{ .inner = s.inner };
-    }
-};
-
-const testStructNoClone = struct {
-    const Self = @This();
-
-    inner: usize,
-};
-
-test "cloneArrayList u8" {
-    const a = std.testing.allocator;
-    var list: std.ArrayList(u8) = .empty;
-    defer list.deinit(a);
-    try list.append(a, 5);
-    var copy = try cloneArrayList(std.testing.allocator, u8, list);
-    defer copy.deinit(a);
-    try std.testing.expectEqual(1, copy.items.len);
-    try std.testing.expectEqual(5, copy.items[0]);
-}
-
-test "cloneArrayList []const u8" {
-    const T = []const u8;
-    const a = std.testing.allocator;
-    var list: std.ArrayList(T) = .empty;
-    defer list.deinit(a);
-    try list.append(a, "testEntry");
-    var copy = try cloneArrayList(std.testing.allocator, T, list);
-    defer copy.deinit(a);
-    try std.testing.expectEqual(1, copy.items.len);
-    try std.testing.expectEqual("testEntry", copy.items[0]);
-}
-
-test "cloneArrayList struct has clone(allocator)" {
-    const T = testStructClone;
-    const a = std.testing.allocator;
-    var list: std.ArrayList(T) = .empty;
-    defer list.deinit(a);
-    try list.append(a, T{ .inner = 523 });
-    var copy = try cloneArrayList(std.testing.allocator, T, list);
-    defer copy.deinit(a);
-    try std.testing.expectEqual(1, copy.items.len);
-    try std.testing.expectEqual(T{ .inner = 523 }, copy.items[0]);
-}
-
-test "cloneArrayList struct has clone() with no allocator parameter" {
-    const T = testStructCloneNoAllocator;
-    const a = std.testing.allocator;
-    var list: std.ArrayList(T) = .empty;
-    defer list.deinit(a);
-    try list.append(a, T{ .inner = 523 });
-    var copy = try cloneArrayList(std.testing.allocator, T, list);
-    defer copy.deinit(a);
-    try std.testing.expectEqual(1, copy.items.len);
-    try std.testing.expectEqual(T{ .inner = 523 }, copy.items[0]);
-}
-
-test "cloneArrayList struct no clone()" {
-    const T = testStructNoClone;
-    const a = std.testing.allocator;
-    var list: std.ArrayList(T) = .empty;
-    defer list.deinit(a);
-    try list.append(a, T{ .inner = 523 });
-    var copy = try cloneArrayList(std.testing.allocator, T, list);
-    defer copy.deinit(a);
-    try std.testing.expectEqual(1, copy.items.len);
-    try std.testing.expectEqual(T{ .inner = 523 }, copy.items[0]);
-}
-
-test "hasParameter" {
-    //has clone with allocator parameter at position 1
-    try std.testing.expect(hasParameter(testStructClone, "clone", std.mem.Allocator, 1));
-
-    //beyond the parameter list
-    try std.testing.expect(!hasParameter(testStructClone, "clone", std.mem.Allocator, 3));
-
-    //wrong parameter position
-    try std.testing.expect(!hasParameter(testStructClone, "clone", std.mem.Allocator, 0));
-
-    //has clone method but no allocator parameter
-    try std.testing.expect(!hasParameter(testStructCloneNoAllocator, "clone", std.mem.Allocator, 1));
-
-    //no clone method
-    try std.testing.expect(!hasParameter(u8, "clone", std.mem.Allocator, 0));
-}
