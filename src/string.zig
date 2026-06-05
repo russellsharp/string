@@ -23,6 +23,12 @@ pub fn string(T: type) type {
             return s;
         }
 
+        pub fn copy(a: std.mem.Allocator, source: string(T)) Self {
+            var s = Self{ .a = a, .i = cloneList(a, T, source.i) catch unreachable };
+            s.set_internal_buffers();
+            return s;
+        }
+
         pub fn deinit(s: *Self) void {
             s.i.deinit(s.a);
             if (s.raw) |buffer| s.a.free(buffer);
@@ -143,6 +149,10 @@ pub fn string(T: type) type {
             return s.i.items.len;
         }
 
+        pub fn capacity(s: *Self) usize {
+            return s.i.capacity;
+        }
+
         pub fn is_empty(s: *Self) bool {
             return s.i.items.len == 0;
         }
@@ -235,6 +245,26 @@ pub fn string(T: type) type {
             return s;
         }
 
+        pub fn find(s: *Self, needle: []const u8, index: usize, needle_len: usize) !i64 {
+            if (index >= s.i.items.len) return StringErrors.InvalidArgument;
+            if (needle_len > needle.len) return StringErrors.InvalidArgument;
+
+            const needle_ = needle[0..needle_len];
+            const haystack_ = s.i.items[index..];
+
+            if (needle_.len > haystack_.len) return -1;
+
+            const found = std.mem.find(T, haystack_, needle_);
+
+            return if (found != null) @intCast(found.?) else @as(i64, -1);
+        }
+
+        pub fn rfind(s: *Self, needle: []const u8, index: usize) !i64 {
+            const haystack_ = s.i.items[0..std.math.clamp(index, 0, s.i.items.len)];
+            const idx = std.mem.findLast(T, haystack_, needle);
+            return if (idx) |i| @as(i64, @intCast(i)) else -1;
+        }
+
         fn set(s: *Self, new: []const T) *Self {
             s.i.clearAndFree(s.a);
             s.i.appendSlice(s.a, new) catch unreachable;
@@ -255,6 +285,21 @@ test "instantiation" {
     var str = string(u8).init(std.testing.allocator, empty);
     defer str.deinit();
     _ = &str;
+}
+
+test "copy constructor" {
+    const a = std.testing.allocator;
+
+    var str_0 = string(u8).init(a, "first");
+    defer str_0.deinit();
+
+    try std.testing.expectEqualStrings("first", str_0.str());
+
+    var str_1 = string(u8).copy(a, str_0);
+    defer str_1.deinit();
+
+    try std.testing.expectEqualStrings("first", str_1.str());
+    try std.testing.expectEqual(str_0.length(), str_1.length());
 }
 
 test "empty string error" {
@@ -325,13 +370,24 @@ test "substr(index, length)" {
 }
 
 test "length" {
-    var str_0 = string(u8).init(std.testing.allocator, empty);
+    const a = std.testing.allocator;
+
+    var str_0 = string(u8).init(a, empty);
     defer str_0.deinit();
 
     try std.testing.expectEqual(0, str_0.length());
 
     _ = str_0.append("1234567");
     try std.testing.expectEqual(7, str_0.length());
+}
+
+test "capacity" {
+    const a = std.testing.allocator;
+
+    var str_0 = string(u8).init(a, "some content");
+    defer str_0.deinit();
+
+    try std.testing.expect(str_0.capacity() > 0);
 }
 
 test "is_empty" {
@@ -491,9 +547,78 @@ test "replace" {
     try std.testing.expectEqual(26, str_4.length());
 }
 
-test "find" {}
+test "find" {
+    const a = std.testing.allocator;
 
-test "rfind" {}
+    const test_bed = "There are two needles in this haystack with needles.";
+
+    const needle_0 = "needle";
+
+    // from str beginning, find first needle
+    var str_0 = string(u8).init(a, test_bed);
+    defer str_0.deinit();
+
+    const found_0 = try str_0.find(needle_0, 0, needle_0.len);
+
+    try std.testing.expect(found_0 >= 0);
+    try std.testing.expectEqual(14, found_0);
+
+    // starting from after first needle, find second needle
+    var str_2 = string(u8).init(a, test_bed);
+    defer str_2.deinit();
+
+    const found_2 = str_2.find(needle_0, @as(usize, @intCast(found_0)) + 1, needle_0.len);
+
+    try std.testing.expectEqual(29, found_2);
+
+    // starting from str beginning, find the first 6 characters of the needle
+    var str_1 = string(u8).init(a, test_bed);
+    defer str_1.deinit();
+
+    const needle_1 = "needles are small";
+    const found_1 = try str_1.find(needle_1, 0, 6);
+
+    try std.testing.expectEqual(14, found_1);
+
+    var str_3 = string(u8).init(a, test_bed);
+    defer str_3.deinit();
+
+    const needle_3 = ".";
+    const found_3 = str_3.find(needle_3, 0, needle_3.len);
+
+    try std.testing.expectEqual(51, found_3);
+}
+
+test "rfind" {
+    const a = std.testing.allocator;
+
+    const test_base = "The sixth sick sheik's sixth sheep's sick.";
+
+    var str_matchsecond = string(u8).init(a, test_base);
+    defer str_matchsecond.deinit();
+
+    const key_matchsecond = "sixth";
+    const found_secondmatch = try str_matchsecond.rfind(key_matchsecond, str_matchsecond.length() - 1);
+
+    try std.testing.expectEqual(23, found_secondmatch);
+
+    var str_nomatch = string(u8).init(a, test_base);
+    defer str_nomatch.deinit();
+
+    const key_nomatch = "seventh";
+    const found_nomatch = try str_nomatch.rfind(key_nomatch, str_nomatch.length());
+
+    try std.testing.expectEqual(-1, found_nomatch);
+
+    // search before the first match from the end
+    var str_earlier = string(u8).init(a, test_base);
+    defer str_earlier.deinit();
+
+    const key_earlier = "sixth";
+    const found_earlier = try str_nomatch.rfind(key_earlier, @as(usize, @intCast(found_secondmatch)));
+
+    try std.testing.expectEqual(4, found_earlier);
+}
 
 test "compare" {}
 
