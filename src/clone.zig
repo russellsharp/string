@@ -1,6 +1,6 @@
 const std = @import("std");
 
-fn cloneArrayList(a: std.mem.Allocator, T: type, source: std.ArrayList(T)) !std.ArrayList(T) {
+pub fn cloneArrayList(a: std.mem.Allocator, T: type, source: std.ArrayList(T)) !std.ArrayList(T) {
     var clone: std.ArrayList(T) = .empty;
     if (comptime std.meta.hasMethod(T, "clone")) {
         if (comptime hasParameter(T, "clone", std.mem.Allocator, 1)) {

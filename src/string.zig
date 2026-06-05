@@ -1,5 +1,5 @@
 const std = @import("std");
-const clone = @import("clone.zig");
+const cloneList = @import("clone.zig").cloneArrayList;
 
 const StringErrors = error{ InvalidArgument, EmptyString };
 
@@ -26,16 +26,20 @@ pub fn string(T: type) type {
         pub fn deinit(s: *Self) void {
             s.i.deinit(s.a);
             if (s.raw) |buffer| s.a.free(buffer);
+            s.raw = null;
             if (s.rawSentinel) |buffer| s.a.free(buffer);
+            s.rawSentinel = null;
         }
 
         pub fn clone(s: Self) Self {
             var c = Self{
                 .a = s.a,
-                .i = std.ArrayList.empty,
+                .i = std.ArrayList(T).empty,
             };
-            c.raw = s.a.dupe(s.raw);
-            c.i = s.i.clone(s.a);
+            if (s.raw) |raw| c.raw = s.a.dupe(T, raw) catch unreachable;
+            if (s.rawSentinel) |rawSentinel| c.rawSentinel = s.a.dupeSentinel(T, rawSentinel, 0) catch unreachable;
+            c.i = s.i.clone(s.a) catch unreachable;
+            return c;
         }
 
         pub fn append(s: *Self, suffix: []const T) *Self {
@@ -176,7 +180,7 @@ pub fn string(T: type) type {
         }
 
         //caller gets a newly allocated []const T that they must free
-        pub fn str(s: *Self) ![]T {
+        pub fn str(s: *Self) []T {
             s.set_internal_buffers();
             return s.raw.?;
         }
@@ -184,6 +188,51 @@ pub fn string(T: type) type {
         pub fn strSentinel(s: *Self) ![:0]T {
             s.set_internal_buffers();
             return s.rawSentinel.?;
+        }
+
+        pub fn erase(s: *Self, index: usize, count: usize) *Self {
+            const start = std.math.clamp(index, 0, s.i.items.len - 1);
+            const end = @min(start + count, s.i.items.len - 1);
+
+            var after: std.ArrayList(T) = .empty;
+            defer after.deinit(s.a);
+
+            for (s.i.items, 0..) |item, i| {
+                if (i < start or i >= end) {
+                    after.append(s.a, item) catch unreachable;
+                }
+            }
+
+            s.i.deinit(s.a);
+            s.i = cloneList(s.a, T, after) catch unreachable;
+
+            s.set_internal_buffers();
+            return s;
+        }
+
+        pub fn replace(s: *Self, index: usize, count: usize, buffer: []const u8) *Self {
+            var after: std.ArrayList(T) = .empty;
+            defer after.deinit(s.a);
+
+            var s_idx: usize = 0;
+            while (s_idx <= s.i.items.len) : (s_idx += 1) {
+                //if we are before the index of replacement
+                if (s_idx < index or
+                    // if we are after the substr replacement and still have str left
+                    (s_idx >= index + @min(buffer.len, count)) and s_idx < s.i.items.len)
+                {
+                    after.append(s.a, s.i.items[s_idx]) catch unreachable;
+                } else if (s_idx == index) {
+                    //insert substr at index
+                    after.appendSlice(s.a, buffer) catch unreachable;
+                }
+            }
+
+            s.i.deinit(s.a);
+            s.i = cloneList(s.a, T, after) catch unreachable;
+
+            s.set_internal_buffers();
+            return s;
         }
 
         fn set(s: *Self, new: []const T) *Self {
@@ -224,10 +273,10 @@ test "append" {
     var str = string(u8).init(std.testing.allocator, empty);
     defer str.deinit();
     _ = str.append("hi");
-    try std.testing.expectEqualStrings("hi", try str.str());
+    try std.testing.expectEqualStrings("hi", str.str());
 
     _ = str.append("hi");
-    try std.testing.expectEqualStrings("hihi", try str.str());
+    try std.testing.expectEqualStrings("hihi", str.str());
 }
 
 test "trimRight" {
@@ -312,14 +361,14 @@ test "resize" {
 
     var resized = str_0.resize(5, 'A');
 
-    try std.testing.expectEqualStrings("conte", try resized.str());
+    try std.testing.expectEqualStrings("conte", resized.str());
     try std.testing.expectEqual(5, resized.length());
 
     var str_1 = string(u8).init(std.testing.allocator, "12345");
     defer str_1.deinit();
     var resizedAdd = str_1.resize(9, 'a');
 
-    try std.testing.expectEqualStrings("12345aaaa", try resizedAdd.str());
+    try std.testing.expectEqualStrings("12345aaaa", resizedAdd.str());
     try std.testing.expectEqual(9, resizedAdd.length());
 }
 
@@ -351,7 +400,7 @@ test "insert" {
     var inserted_before = str_0.insert(0, "you look like you need some insurance");
 
     try std.testing.expectEqual(62, inserted_before.length());
-    try std.testing.expectEqualStrings("you look like you need some insurancecontent for your pleasure", try inserted_before.str());
+    try std.testing.expectEqualStrings("you look like you need some insurancecontent for your pleasure", inserted_before.str());
 
     var str_1 = string(u8).init(std.testing.allocator, "content for your pleasure");
     defer str_1.deinit();
@@ -359,7 +408,7 @@ test "insert" {
     var inserted_middle = str_1.insert(10, "you look like you need some insurance");
 
     try std.testing.expectEqual(62, inserted_middle.length());
-    try std.testing.expectEqualStrings("content foyou look like you need some insurancer your pleasure", try inserted_middle.str());
+    try std.testing.expectEqualStrings("content foyou look like you need some insurancer your pleasure", inserted_middle.str());
 
     var str_2 = string(u8).init(std.testing.allocator, "content for your pleasure");
     defer str_2.deinit();
@@ -367,12 +416,80 @@ test "insert" {
     var inserted_after = str_2.insert(27, "you look like you need some insurance");
 
     try std.testing.expectEqual(62, inserted_after.length());
-    try std.testing.expectEqualStrings("content for your pleasureyou look like you need some insurance", try inserted_after.str());
+    try std.testing.expectEqualStrings("content for your pleasureyou look like you need some insurance", inserted_after.str());
 }
 
-test "erase" {}
+test "erase" {
+    var str_0 = string(u8).init(std.testing.allocator, "content for your pleasure");
+    defer str_0.deinit();
 
-test "replace" {}
+    _ = str_0.erase(0, 8);
+
+    try std.testing.expectEqualStrings("for your pleasure", str_0.str());
+
+    var str_1 = string(u8).init(std.testing.allocator, "content for your pleasure");
+    defer str_1.deinit();
+
+    _ = str_1.erase(50, 10);
+
+    try std.testing.expectEqualStrings("content for your pleasure", str_1.str());
+
+    var str_2 = string(u8).init(std.testing.allocator, "content for your pleasure");
+    defer str_2.deinit();
+
+    _ = str_2.erase(5, 4);
+
+    try std.testing.expectEqualStrings("conteor your pleasure", str_2.str());
+}
+
+test "replace" {
+    const original = "this is a test string.";
+
+    //at beginning and within string
+    var str_0 = string(u8).init(std.testing.allocator, original);
+    defer str_0.deinit();
+
+    _ = str_0.replace(9, 5, "n example");
+
+    try std.testing.expectEqualStrings("this is an example string.", str_0.str());
+    try std.testing.expectEqual(26, str_0.length());
+
+    //within string, substr beyond end of str
+    var str_1 = string(u8).init(std.testing.allocator, original);
+    defer str_1.deinit();
+
+    _ = str_1.replace(21, 5, " and example");
+
+    try std.testing.expectEqualStrings("this is a test string and example", str_1.str());
+    try std.testing.expectEqual(33, str_1.length());
+
+    //within string, substr shorter than index + count
+    var str_2 = string(u8).init(std.testing.allocator, original);
+    defer str_2.deinit();
+
+    _ = str_2.replace(15, 10, "for you");
+
+    try std.testing.expectEqualStrings("this is a test for you", str_2.str());
+    try std.testing.expectEqual(22, str_2.length());
+
+    //end of str, substr longer than index + count
+    var str_3 = string(u8).init(std.testing.allocator, "content for your pleasure");
+    defer str_3.deinit();
+
+    _ = str_3.replace(25, 5, " and consumption");
+
+    try std.testing.expectEqualStrings("content for your pleasure and consumption", str_3.str());
+    try std.testing.expectEqual(41, str_3.length());
+
+    //end of str, substr shorter than index + count
+    var str_4 = string(u8).init(std.testing.allocator, "content for your pleasure");
+    defer str_4.deinit();
+
+    _ = str_4.replace(25, 5, "s");
+
+    try std.testing.expectEqualStrings("content for your pleasures", str_4.str());
+    try std.testing.expectEqual(26, str_4.length());
+}
 
 test "find" {}
 
