@@ -12,6 +12,7 @@ pub fn string(T: type) type {
         a: std.mem.Allocator,
         i: std.ArrayList(T) = .empty,
         raw: ?[]T = null,
+        rawSentinel: ?[:0]T = null,
 
         pub fn init(a: std.mem.Allocator, initial: ?[]const T) Self {
             var s = Self{
@@ -24,7 +25,8 @@ pub fn string(T: type) type {
 
         pub fn deinit(s: *Self) void {
             s.i.deinit(s.a);
-            if (s.raw) |in| s.a.free(in);
+            if (s.raw) |buffer| s.a.free(buffer);
+            if (s.rawSentinel) |buffer| s.a.free(buffer);
         }
 
         pub fn clone(s: Self) Self {
@@ -36,16 +38,10 @@ pub fn string(T: type) type {
             c.i = s.i.clone(s.a);
         }
 
-        pub fn append(s: *Self, suffix: []const T) !*Self {
-            try s.i.appendSlice(s.a, suffix);
+        pub fn append(s: *Self, suffix: []const T) *Self {
+            s.i.appendSlice(s.a, suffix) catch unreachable;
+            s.set_internal_buffers();
             return s;
-        }
-
-        //caller gets a newly allocated []const T that they must free
-        pub fn str(s: *Self) ![]T {
-            if (s.raw) |previous| s.a.free(previous);
-            s.raw = try s.a.dupe(T, s.i.items);
-            return s.raw.?;
         }
 
         pub fn trimRight(s: *Self, charactersToTrim: []const T) ![]T {
@@ -65,6 +61,7 @@ pub fn string(T: type) type {
 
             s.i.shrinkAndFree(s.a, last);
 
+            s.set_internal_buffers();
             return s.str();
         }
 
@@ -118,6 +115,7 @@ pub fn string(T: type) type {
             const trimmed = try s.a.dupe(T, s.i.items[first..last]);
             defer s.a.free(trimmed);
 
+            //s.set sets internal buffers
             return s.set(trimmed).str();
         }
 
@@ -133,6 +131,7 @@ pub fn string(T: type) type {
             const subString = try subList.toOwnedSlice(s.a);
             defer s.a.free(subString);
 
+            //s.set sets internal buffers
             return s.set(subString).str();
         }
 
@@ -145,20 +144,67 @@ pub fn string(T: type) type {
         }
 
         pub fn clear(s: *Self) *Self {
+            defer s.set_internal_buffers();
             return s.set(empty);
+        }
+
+        pub fn resize(s: *Self, size: usize, value: ?T) *Self {
+            if (size > s.i.items.len and value != null) {
+                const growth = size - s.i.items.len;
+                const slice = s.i.addManyAsSlice(s.a, growth) catch unreachable;
+                @memset(slice, value.?);
+            } else if (size < s.i.items.len) {
+                s.i.shrinkAndFree(s.a, size);
+            }
+            s.set_internal_buffers();
+            return s;
+        }
+
+        pub fn at(s: *Self, pos: usize) !T {
+            if (pos > s.i.items.len - 1) return StringErrors.InvalidArgument;
+            return s.i.items[pos];
+        }
+
+        pub fn insert(s: *Self, pos: usize, slice: []const T) *Self {
+            const clampedPos = std.math.clamp(pos, 0, s.i.items.len);
+
+            s.i.insertSlice(s.a, clampedPos, slice) catch unreachable;
+
+            s.set_internal_buffers();
+
+            return s;
+        }
+
+        //caller gets a newly allocated []const T that they must free
+        pub fn str(s: *Self) ![]T {
+            s.set_internal_buffers();
+            return s.raw.?;
+        }
+
+        pub fn strSentinel(s: *Self) ![:0]T {
+            s.set_internal_buffers();
+            return s.rawSentinel.?;
         }
 
         fn set(s: *Self, new: []const T) *Self {
             s.i.clearAndFree(s.a);
             s.i.appendSlice(s.a, new) catch unreachable;
-            _ = s.str() catch unreachable;
+            s.set_internal_buffers();
             return s;
+        }
+
+        inline fn set_internal_buffers(s: *Self) void {
+            if (s.raw) |previous| s.a.free(previous);
+            s.raw = s.a.dupe(T, s.i.items) catch unreachable;
+            if (s.rawSentinel) |previous| s.a.free(previous);
+            s.rawSentinel = s.a.dupeSentinel(T, s.i.items, 0) catch unreachable;
         }
     };
 }
 
 test "instantiation" {
     var str = string(u8).init(std.testing.allocator, empty);
+    defer str.deinit();
     _ = &str;
 }
 
@@ -177,10 +223,10 @@ test "empty string" {
 test "append" {
     var str = string(u8).init(std.testing.allocator, empty);
     defer str.deinit();
-    _ = try str.append("hi");
+    _ = str.append("hi");
     try std.testing.expectEqualStrings("hi", try str.str());
 
-    _ = try str.append("hi");
+    _ = str.append("hi");
     try std.testing.expectEqualStrings("hihi", try str.str());
 }
 
@@ -235,7 +281,7 @@ test "length" {
 
     try std.testing.expectEqual(0, str_0.length());
 
-    _ = try str_0.append("1234567");
+    _ = str_0.append("1234567");
     try std.testing.expectEqual(7, str_0.length());
 }
 
@@ -260,13 +306,69 @@ test "clear" {
     try std.testing.expect(str_0.is_empty());
 }
 
-test "resize" {}
+test "resize" {
+    var str_0 = string(u8).init(std.testing.allocator, "content for your pleasure");
+    defer str_0.deinit();
 
-test "at" {}
+    var resized = str_0.resize(5, 'A');
 
-test "strSentinel" {}
+    try std.testing.expectEqualStrings("conte", try resized.str());
+    try std.testing.expectEqual(5, resized.length());
 
-test "insert" {}
+    var str_1 = string(u8).init(std.testing.allocator, "12345");
+    defer str_1.deinit();
+    var resizedAdd = str_1.resize(9, 'a');
+
+    try std.testing.expectEqualStrings("12345aaaa", try resizedAdd.str());
+    try std.testing.expectEqual(9, resizedAdd.length());
+}
+
+test "at" {
+    var str_0 = string(u8).init(std.testing.allocator, "content for your pleasure");
+    defer str_0.deinit();
+
+    try std.testing.expectEqual('c', try str_0.at(0));
+    try std.testing.expectEqual('e', try str_0.at(4));
+    try std.testing.expectError(StringErrors.InvalidArgument, str_0.at(555));
+}
+
+test "strSentinel" {
+    var str_0 = string(u8).init(std.testing.allocator, "content for your pleasure");
+    defer str_0.deinit();
+
+    const sentineled = try str_0.strSentinel();
+    const expectedSentineled = "content for your pleasure".*;
+    try std.testing.expectEqualStrings(&expectedSentineled, sentineled);
+    try std.testing.expectEqual('e', sentineled[24]);
+    try std.testing.expectEqual('e', sentineled[24]);
+    try std.testing.expectEqual(25, std.mem.indexOfSentinel(u8, 0, sentineled));
+}
+
+test "insert" {
+    var str_0 = string(u8).init(std.testing.allocator, "content for your pleasure");
+    defer str_0.deinit();
+
+    var inserted_before = str_0.insert(0, "you look like you need some insurance");
+
+    try std.testing.expectEqual(62, inserted_before.length());
+    try std.testing.expectEqualStrings("you look like you need some insurancecontent for your pleasure", try inserted_before.str());
+
+    var str_1 = string(u8).init(std.testing.allocator, "content for your pleasure");
+    defer str_1.deinit();
+
+    var inserted_middle = str_1.insert(10, "you look like you need some insurance");
+
+    try std.testing.expectEqual(62, inserted_middle.length());
+    try std.testing.expectEqualStrings("content foyou look like you need some insurancer your pleasure", try inserted_middle.str());
+
+    var str_2 = string(u8).init(std.testing.allocator, "content for your pleasure");
+    defer str_2.deinit();
+
+    var inserted_after = str_2.insert(27, "you look like you need some insurance");
+
+    try std.testing.expectEqual(62, inserted_after.length());
+    try std.testing.expectEqualStrings("content for your pleasureyou look like you need some insurance", try inserted_after.str());
+}
 
 test "erase" {}
 
