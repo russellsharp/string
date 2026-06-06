@@ -1,7 +1,7 @@
 const std = @import("std");
 const cloneList = @import("clone.zig").cloneArrayList;
 
-const StringErrors = error{ InvalidArgument, EmptyString };
+const StringErrors = error{ InvalidArgument, EmptyString, ArgumentOutOfRange };
 
 pub const empty = "";
 
@@ -169,8 +169,8 @@ pub fn string(T: type) type {
         pub fn resize(s: *Self, size: usize, value: ?T) *Self {
             if (size > s.i.items.len and value != null) {
                 const growth = size - s.i.items.len;
-                const slice = s.i.addManyAsSlice(s.a, growth) catch unreachable;
-                @memset(slice, value.?);
+                const slice_ = s.i.addManyAsSlice(s.a, growth) catch unreachable;
+                @memset(slice_, value.?);
             } else if (size < s.i.items.len) {
                 s.i.shrinkAndFree(s.a, size);
             }
@@ -183,10 +183,10 @@ pub fn string(T: type) type {
             return s.i.items[pos];
         }
 
-        pub fn insert(s: *Self, pos: usize, slice: []const T) *Self {
+        pub fn insert(s: *Self, pos: usize, value: []const T) *Self {
             const clampedPos = std.math.clamp(pos, 0, s.i.items.len);
 
-            s.i.insertSlice(s.a, clampedPos, slice) catch unreachable;
+            s.i.insertSlice(s.a, clampedPos, value) catch unreachable;
 
             s.set_internal_buffers();
 
@@ -297,14 +297,14 @@ pub fn string(T: type) type {
             return -1;
         }
 
-        pub fn find_first_not_of(s: *Self, needle: []const u8, index: usize, n: usize) !i64 {
+        pub fn find_first_not_of(s: *Self, notlist: []const u8, index: usize, n: usize) !i64 {
             if (index >= s.i.items.len) return -1;
 
-            const focus = s.i.items[index..];
-            const needle_ = needle[0..n];
+            const haystack_ = s.i.items[index..];
+            const notlist_ = notlist[0..n];
 
-            for (focus, 0..) |c, i| {
-                if (!std.mem.containsAtLeastScalar2(T, needle_, c, 1)) {
+            for (haystack_, 0..) |needle, i| {
+                if (!std.mem.containsAtLeastScalar2(T, notlist_, needle, 1)) {
                     return @as(i64, @intCast(i + index));
                 }
             }
@@ -323,6 +323,58 @@ pub fn string(T: type) type {
             }
 
             return -1;
+        }
+
+        pub fn compare(s: *Self, b: []const T) i8 {
+            return s.comparen(0, s.i.items.len, b, s.i.items.len);
+        }
+
+        pub fn comparen(s: *Self, pos: usize, len: usize, b: []const T, n: usize) i8 {
+            _ = pos;
+            _ = len;
+            _ = len;
+
+            // const compared = s.i.items[pos..pos+len];
+            // if( n > b.len ) return StringErrors.InvalidArgument;
+            // if (pos > s.i.items.len) return StringErrors.ArgumentOutOfRange;
+            // if(subpos > b.len) return StringErrors.ArgumentOutOfRange
+            var i: usize = 0;
+            while (i <= b.len and i <= s.i.items.len) : (i += 1) {
+                if (i == s.i.items.len and i == b.len) {
+                    std.debug.print("ran out of both, equal\n", .{});
+                    return 0;
+                } else if (i == s.i.items.len and i < b.len) {
+                    std.debug.print("ran out of compared\n", .{});
+                    return 1;
+                } else if (i == b.len and i < s.i.items.len) {
+                    std.debug.print("ran out of comparing\n", .{});
+                    return -1;
+                }
+
+                const c = s.i.items[i];
+                std.debug.print("{d}: a -> '{c}',  b -> '{c}'\n", .{ i, c, b[i] });
+
+                if (c > b[i]) {
+                    return 1;
+                } else if (b[i] > c) {
+                    return -1;
+                }
+
+                if (i == n) return 0;
+            }
+            return 0;
+        }
+
+        pub fn span(s: *Self, index: usize, len: usize) string(T) {
+            return s.slice(index, len);
+        }
+
+        pub fn slice(s: *Self, index: usize, len: usize) string(T) {
+            if (index >= s.i.items.len) return string(T).init(s.a, empty);
+            const span_ = s.a.dupe(T, s.i.items[index..std.math.clamp(len, 0, s.i.items.len)]) catch unreachable;
+            defer s.a.free(span_);
+            const str_span = string(T).init(s.a, span_);
+            return str_span;
         }
 
         inline fn set(s: *Self, value: []T) *Self {
@@ -733,7 +785,7 @@ test "find_first_of" {
     //find first character of the first character from the given string
     var str_match_slice_substr = string(u8).init(a, test_base);
     defer str_match_slice_substr.deinit();
-    const match_slice_substr = str_match_slice.find_first_of("ag", 0, 1);
+    const match_slice_substr = str_match_slice_substr.find_first_of("ag", 0, 1);
 
     try std.testing.expectEqual(20, match_slice_substr);
 }
@@ -787,7 +839,75 @@ test "find_last_of" {
     try std.testing.expectEqual(20, match_case);
 }
 
-test "find_first_not_of" {}
+test "find_first_not_of" {
+    const a = std.testing.allocator;
+
+    const test_base = "A test string of great import.";
+
+    var str_match_first = string(u8).init(a, test_base);
+    defer str_match_first.deinit();
+
+    const first_match = str_match_first.find_first_not_of("t", 0, 1);
+
+    try std.testing.expectEqual(0, first_match);
+
+    var str_match_none = string(u8).init(a, test_base);
+    defer str_match_none.deinit();
+    const match_none = str_match_none.find_first_not_of(test_base, 0, test_base.len);
+
+    try std.testing.expectEqual(-1, match_none);
+
+    var str_match_second = string(u8).init(a, test_base);
+    defer str_match_second.deinit();
+
+    const match_second_needle = "A es";
+    const match_second = str_match_second.find_first_not_of(match_second_needle, 4, match_second_needle.len);
+
+    try std.testing.expectEqual(5, match_second);
+
+    var str_match_second_none = string(u8).init(a, test_base);
+    defer str_match_second_none.deinit();
+    const match_second_none = str_match_second_none.find_first_not_of(".", 29, 1);
+
+    try std.testing.expectEqual(-1, match_second_none);
+
+    var str_match_none_beyond = string(u8).init(a, test_base);
+    defer str_match_none_beyond.deinit();
+    const match_none_beyond = str_match_none_beyond.find_first_not_of("t", 55, 1);
+
+    try std.testing.expectEqual(-1, match_none_beyond);
+
+    var str_match_case = string(u8).init(a, test_base);
+    defer str_match_case.deinit();
+    const match_case = str_match_case.find_first_not_of("a", 0, 1);
+
+    try std.testing.expectEqual(0, match_case);
+
+    //find first character of the first character from the given string
+    var str_match_slice_substr = string(u8).init(a, test_base);
+    defer str_match_slice_substr.deinit();
+    const match_slice_substr = str_match_slice_substr.find_first_not_of("A test strin", 0, "A test strin".len - 3);
+
+    try std.testing.expectEqual(@as(i64, @intCast("A test strin".len - 3)), match_slice_substr);
+
+    // Passing in an empty notlist by n parameter of 0 means we are looking for characters not present
+    // in a "none of the above" search set, which will cause it to return the index of the very first
+    // character in your target string
+
+    var str_match_empty_needle_by_n = string(u8).init(a, test_base);
+    defer str_match_empty_needle_by_n.deinit();
+    const needle_empty_needle_by_n = "A test strin";
+    const match_empty_needle_by_n = str_match_slice_substr.find_first_not_of(needle_empty_needle_by_n, 0, 0);
+
+    try std.testing.expectEqual(0, match_empty_needle_by_n);
+
+    var str_match_empty_needle = string(u8).init(a, test_base);
+    defer str_match_empty_needle.deinit();
+    const needle_empty_needle = "";
+    const match_empty_needle = str_match_slice_substr.find_first_not_of(needle_empty_needle, 0, 0);
+
+    try std.testing.expectEqual(0, match_empty_needle);
+}
 
 test "find_last_not_of" {
     const a = std.testing.allocator;
@@ -834,9 +954,75 @@ test "find_last_not_of" {
     try std.testing.expectEqual(28, match_case);
 }
 
-test "compare" {}
+test "compare" {
+    const a = std.testing.allocator;
 
-test "span" {}
+    const test_base_a = "A test string of great import.     \r\n ";
+    const test_base_b = "A test string of lesser import.     \r\n ";
+
+    var str_a = string(u8).init(a, test_base_a);
+    defer str_a.deinit();
+    var str_b = string(u8).init(a, test_base_b);
+    defer str_b.deinit();
+
+    std.debug.print("a.b\n", .{});
+
+    try std.testing.expectEqual(-1, str_a.compare(str_b.str()));
+
+    std.debug.print("a.a\n", .{});
+
+    try std.testing.expectEqual(0, str_a.compare(str_a.str()));
+
+    std.debug.print("b.a\n", .{});
+
+    try std.testing.expectEqual(1, str_b.compare(str_a.str()));
+
+    const test_base_a_longer = "A test string of great import.     \r\n 111111111111";
+
+    var str_a_longer = string(u8).init(a, test_base_a_longer);
+    defer str_a_longer.deinit();
+
+    std.debug.print("short.longer\n", .{});
+
+    try std.testing.expectEqual(1, str_a.compare(str_a_longer.str()));
+
+    std.debug.print("longer.short\n", .{});
+
+    try std.testing.expectEqual(-1, str_a_longer.compare(str_a.str()));
+}
+
+test "comparen" {
+    // const a = std.testing.allocator;
+
+    // const test_base_a = "A test string of great import.     \r\n ";
+    // const test_base_b = "A test string of lesser import.     \r\n ";
+
+    // var str_a = string(u8).init(a, test_base_a);
+    // defer str_a.deinit();
+    // var str_b = string(u8).init(a, test_base_b);
+    // defer str_b.deinit();
+
+    // std.testing.expect(!str_a.comparen(str_b));
+}
+
+test "span and slice" {
+    const a = std.testing.allocator;
+
+    const test_base = "A test string of great import.     \r\n ";
+
+    var str_0 = string(u8).init(a, test_base);
+    defer str_0.deinit();
+
+    var slice = str_0.slice(0, 4);
+    defer slice.deinit();
+    try std.testing.expectEqualStrings("A te", slice.str());
+    try std.testing.expectEqual(4, slice.length());
+
+    var span = str_0.span(0, 4);
+    defer span.deinit();
+    try std.testing.expectEqualStrings("A te", span.str());
+    try std.testing.expectEqual(4, span.length());
+}
 
 test "fromWriter" {}
 
@@ -845,4 +1031,4 @@ test "fromSlice" {}
 test "fromArrayList" {}
 
 //TODO: use string(T) as parameters instead of []const T
-//TODO modules for each file.  test steps for each module
+//TODO: modules for each file.  test steps for each module
