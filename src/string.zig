@@ -283,6 +283,48 @@ pub fn string(T: type) type {
             return -1;
         }
 
+        pub fn find_last_of(s: *Self, needle: []const u8, index: usize, n: usize) !i64 {
+            const haystack_ = s.i.items[0..std.math.clamp(index, 0, s.i.items.len)];
+            const needle_ = needle[0..n];
+
+            var idx: usize = haystack_.len - 1;
+            while (idx > 0) : (idx -= 1) {
+                if (std.mem.containsAtLeastScalar2(T, needle_, haystack_[idx], 1)) {
+                    return @as(i64, @intCast(idx));
+                }
+            }
+
+            return -1;
+        }
+
+        pub fn find_first_not_of(s: *Self, needle: []const u8, index: usize, n: usize) !i64 {
+            if (index >= s.i.items.len) return -1;
+
+            const focus = s.i.items[index..];
+            const needle_ = needle[0..n];
+
+            for (focus, 0..) |c, i| {
+                if (!std.mem.containsAtLeastScalar2(T, needle_, c, 1)) {
+                    return @as(i64, @intCast(i + index));
+                }
+            }
+            return -1;
+        }
+
+        pub fn find_last_not_of(s: *Self, needle: []const u8, index: usize, n: usize) !i64 {
+            const haystack_ = s.i.items[0..std.math.clamp(index, 0, s.i.items.len)];
+            const needle_ = needle[0..n];
+
+            var idx: usize = haystack_.len - 1;
+            while (idx > 0) : (idx -= 1) {
+                if (!std.mem.containsAtLeastScalar2(T, needle_, haystack_[idx], 1)) {
+                    return @as(i64, @intCast(idx));
+                }
+            }
+
+            return -1;
+        }
+
         inline fn set(s: *Self, value: []T) *Self {
             s.i.clearAndFree(s.a);
             const copy_buffer = s.a.dupe(T, value) catch unreachable;
@@ -678,7 +720,7 @@ test "find_first_of" {
 
     var str_match_slice = string(u8).init(a, test_base);
     defer str_match_slice.deinit();
-    const match_slice = str_match_slice.find_first_of("ga", 0, 1);
+    const match_slice = str_match_slice.find_first_of("ga", 0, 2);
 
     try std.testing.expectEqual(12, match_slice);
 
@@ -687,14 +729,120 @@ test "find_first_of" {
     const match_case = str_match_case.find_first_of("a", 0, 1);
 
     try std.testing.expectEqual(20, match_case);
+
+    //find first character of the first character from the given string
+    var str_match_slice_substr = string(u8).init(a, test_base);
+    defer str_match_slice_substr.deinit();
+    const match_slice_substr = str_match_slice.find_first_of("ag", 0, 1);
+
+    try std.testing.expectEqual(20, match_slice_substr);
 }
 
-test "find_last_of" {}
+test "find_last_of" {
+    const a = std.testing.allocator;
+
+    const test_base = "A test string of great import.";
+
+    var str_match_first = string(u8).init(a, test_base);
+    defer str_match_first.deinit();
+
+    const first_match = try str_match_first.find_last_of("t", test_base.len, 1);
+
+    try std.testing.expectEqual(28, first_match);
+
+    var str_match_none = string(u8).init(a, test_base);
+    defer str_match_none.deinit();
+    const match_none = try str_match_none.find_last_of("u", test_base.len, 1);
+
+    try std.testing.expectEqual(-1, match_none);
+
+    var str_match_second = string(u8).init(a, test_base);
+    defer str_match_second.deinit();
+    const match_second = try str_match_second.find_last_of("t", test_base.len - 6, 1);
+
+    try std.testing.expectEqual(@as(i64, @intCast(test_base.len - 9)), match_second);
+
+    var str_match_second_none = string(u8).init(a, test_base);
+    defer str_match_second_none.deinit();
+    const match_second_none = try str_match_second_none.find_last_of("t", 2, 1);
+
+    try std.testing.expectEqual(-1, match_second_none);
+
+    var str_match_none_beyond = string(u8).init(a, test_base);
+    defer str_match_none_beyond.deinit();
+    const match_none_beyond = try str_match_none_beyond.find_last_of("t", 1, 1);
+
+    try std.testing.expectEqual(-1, match_none_beyond);
+
+    var str_match_slice = string(u8).init(a, test_base);
+    defer str_match_slice.deinit();
+    const match_slice = try str_match_slice.find_last_of("ga", test_base.len, 2);
+
+    try std.testing.expectEqual(20, match_slice);
+
+    var str_match_case = string(u8).init(a, test_base);
+    defer str_match_case.deinit();
+    const match_case = try str_match_case.find_last_of("a", test_base.len, 1);
+
+    try std.testing.expectEqual(20, match_case);
+}
+
+test "find_first_not_of" {}
+
+test "find_last_not_of" {
+    const a = std.testing.allocator;
+
+    const test_base = "A test string of great import.     \r\n ";
+
+    var str_match_last = string(u8).init(a, test_base);
+    defer str_match_last.deinit();
+
+    const first_match = try str_match_last.find_last_not_of("t", test_base.len, 1);
+
+    try std.testing.expectEqual(@as(i64, @intCast(test_base.len - 1)), first_match);
+
+    var str_match_nonwhitespace = string(u8).init(a, test_base);
+    defer str_match_nonwhitespace.deinit();
+    const match_nonwhitespace = try str_match_nonwhitespace.find_last_not_of(" \t\r\n", test_base.len, 4);
+
+    try std.testing.expectEqual(29, match_nonwhitespace);
+
+    var str_match_second = string(u8).init(a, test_base);
+    defer str_match_second.deinit();
+    const match_second = try str_match_second.find_last_not_of("t.", test_base.len - 10, 2);
+
+    try std.testing.expectEqual(27, match_second);
+
+    var str_match_second_none = string(u8).init(a, test_base);
+    defer str_match_second_none.deinit();
+    const match_second_none = try str_match_second_none.find_last_not_of(test_base, test_base.len, test_base.len);
+
+    try std.testing.expectEqual(-1, match_second_none);
+
+    var str_match_none_beyond = string(u8).init(a, test_base);
+    defer str_match_none_beyond.deinit();
+    const match_none_beyond = try str_match_none_beyond.find_last_not_of("t", 1, 1);
+
+    try std.testing.expectEqual(-1, match_none_beyond);
+
+    var str_match_case = string(u8).init(a, test_base);
+    defer str_match_case.deinit();
+
+    const test_base_uppercase = "A TEST STRING OF GREAT IMPORT.     \r\n ";
+    const match_case = try str_match_case.find_last_not_of(test_base_uppercase, test_base.len, test_base_uppercase.len);
+
+    try std.testing.expectEqual(28, match_case);
+}
 
 test "compare" {}
+
+test "span" {}
 
 test "fromWriter" {}
 
 test "fromSlice" {}
 
 test "fromArrayList" {}
+
+//TODO: use string(T) as parameters instead of []const T
+//TODO modules for each file.  test steps for each module
