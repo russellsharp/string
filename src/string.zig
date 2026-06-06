@@ -19,12 +19,16 @@ pub fn string(T: type) type {
                 .a = a,
                 .i = std.ArrayList(T).empty,
             };
-            if (initial) |value| _ = s.set(value);
+            if (initial) |value| _ = s.i.appendSlice(a, value) catch unreachable;
+            s.set_internal_buffers();
             return s;
         }
 
         pub fn copy(a: std.mem.Allocator, source: string(T)) Self {
-            var s = Self{ .a = a, .i = cloneList(a, T, source.i) catch unreachable };
+            var s = Self{ .a = a, .i = .empty };
+            const copy_buffer = a.dupe(T, source.i.items) catch unreachable;
+            defer a.free(copy_buffer);
+            s.i.appendSlice(a, copy_buffer) catch unreachable;
             s.set_internal_buffers();
             return s;
         }
@@ -265,9 +269,25 @@ pub fn string(T: type) type {
             return if (idx) |i| @as(i64, @intCast(i)) else -1;
         }
 
-        fn set(s: *Self, new: []const T) *Self {
+        pub fn find_first_of(s: *Self, needle: []const u8, index: usize, n: usize) !i64 {
+            if (index >= s.i.items.len) return -1;
+
+            const focus = s.i.items[index..];
+            const needle_ = needle[0..n];
+
+            for (focus, 0..) |c, i| {
+                if (std.mem.containsAtLeastScalar2(T, needle_, c, 1)) {
+                    return @as(i64, @intCast(i + index));
+                }
+            }
+            return -1;
+        }
+
+        inline fn set(s: *Self, value: []T) *Self {
             s.i.clearAndFree(s.a);
-            s.i.appendSlice(s.a, new) catch unreachable;
+            const copy_buffer = s.a.dupe(T, value) catch unreachable;
+            defer s.a.free(copy_buffer);
+            s.i.appendSlice(s.a, copy_buffer) catch unreachable;
             s.set_internal_buffers();
             return s;
         }
@@ -619,6 +639,57 @@ test "rfind" {
 
     try std.testing.expectEqual(4, found_earlier);
 }
+
+test "find_first_of" {
+    const a = std.testing.allocator;
+
+    const test_base = "A test string of great import.";
+
+    var str_match_first = string(u8).init(a, test_base);
+    defer str_match_first.deinit();
+
+    const first_match = str_match_first.find_first_of("t", 0, 1);
+
+    try std.testing.expectEqual(2, first_match);
+
+    var str_match_none = string(u8).init(a, test_base);
+    defer str_match_none.deinit();
+    const match_none = str_match_none.find_first_of("u", 0, 1);
+
+    try std.testing.expectEqual(-1, match_none);
+
+    var str_match_second = string(u8).init(a, test_base);
+    defer str_match_second.deinit();
+    const match_second = str_match_second.find_first_of("t", 3, 1);
+
+    try std.testing.expectEqual(5, match_second);
+
+    var str_match_second_none = string(u8).init(a, test_base);
+    defer str_match_second_none.deinit();
+    const match_second_none = str_match_second_none.find_first_of("t", 29, 1);
+
+    try std.testing.expectEqual(-1, match_second_none);
+
+    var str_match_none_beyond = string(u8).init(a, test_base);
+    defer str_match_none_beyond.deinit();
+    const match_none_beyond = str_match_none_beyond.find_first_of("t", 55, 1);
+
+    try std.testing.expectEqual(-1, match_none_beyond);
+
+    var str_match_slice = string(u8).init(a, test_base);
+    defer str_match_slice.deinit();
+    const match_slice = str_match_slice.find_first_of("ga", 0, 1);
+
+    try std.testing.expectEqual(12, match_slice);
+
+    var str_match_case = string(u8).init(a, test_base);
+    defer str_match_case.deinit();
+    const match_case = str_match_case.find_first_of("a", 0, 1);
+
+    try std.testing.expectEqual(20, match_case);
+}
+
+test "find_last_of" {}
 
 test "compare" {}
 
