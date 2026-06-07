@@ -382,7 +382,7 @@ pub fn string(T: type) type {
             return s.raw.?;
         }
 
-        pub fn strSentinel(s: *Self) ![:sentinel]T {
+        pub fn strSentinel(s: *Self) [:sentinel]T {
             s.set_internal_buffers();
             return s.rawSentinel.?;
         }
