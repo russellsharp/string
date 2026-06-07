@@ -313,47 +313,43 @@ pub fn string(T: type) type {
         }
 
         pub fn compare(s: *Self, b: []const T) !i8 {
-            return try s.comparen(0, s.i.items.len, b, @max(b.len, s.i.items.len));
+            return try s.comparen(0, s.i.items.len, b, -1);
         }
 
-        pub fn comparen(s: *Self, pos: usize, len: usize, b: []const T, n: usize) !i8 {
+        pub fn comparen(s: *Self, pos: usize, len: usize, b: []const T, n: i32) !i8 {
             if (pos >= s.i.items.len) return StringErrors.ArgumentOutOfRange;
-
+            const num_of_chars: usize = @intCast(if (n < 0) @max(s.i.items.len, b.len) else @as(u64, @intCast(n)));
             const compared = s.i.items[pos..std.math.clamp(pos + len, pos, s.i.items.len)];
-
-            const comparing = b[0..std.math.clamp(n, 0, b.len)];
+            const comparing = b[0..std.math.clamp(num_of_chars, 0, b.len)];
 
             var idx: usize = 0;
-            while (idx <= comparing.len and idx <= compared.len and idx < n) : (idx += 1) {
-                //if we run out of characters in both strings at the same length
-                if (idx == compared.len and idx == comparing.len) {
-                    return 0;
-                } else if (idx == compared.len and idx < comparing.len) {
-                    //haven't reached n, exhausted comparedcharacters
-                    return -1;
-                } else if (idx == comparing.len and idx < compared.len) {
-                    //haven't reached n, exhausted comparing characters
-                    return 1;
-                }
-
-                if (idx >= compared.len) {
-                    //compared characters of both but reached end of compared
-                    return -1;
-                } else if (idx >= comparing.len) {
-                    //compared characters of both but reached end of comparing
-                    return 1;
-                }
-
+            while (idx < comparing.len and idx < compared.len and idx < num_of_chars) : (idx += 1) {
                 const c = compared[idx];
-
                 // compare characters from  each string
                 if (c > comparing[idx]) {
                     return 1;
                 } else if (comparing[idx] > c) {
                     return -1;
                 }
+            }
 
-                if (idx == n) return 0;
+            if (idx == num_of_chars) {
+                return 0;
+            }
+
+            //if we run out of characters in both strings at the same length
+            if (idx == compared.len and idx == comparing.len) {
+                return 0;
+            }
+
+            //haven't reached n, exhausted comparedcharacters
+            if (idx == compared.len and idx < comparing.len) {
+                return -1;
+            }
+
+            //haven't reached n, exhausted comparing characters
+            if (idx == comparing.len and idx < compared.len) {
+                return 1;
             }
             return 0;
         }
@@ -981,15 +977,9 @@ test "compare" {
     var str_b = string(u8).init(a, test_base_b);
     defer str_b.deinit();
 
-    //std.debug.print("a.b\n", .{});
-
     try std.testing.expectEqual(-1, str_a.compare(str_b.str()));
 
-    //std.debug.print("a.a\n", .{});
-
     try std.testing.expectEqual(0, str_a.compare(str_a.str()));
-
-    //std.debug.print("b.a\n", .{});
 
     try std.testing.expectEqual(1, str_b.compare(str_a.str()));
 
@@ -998,11 +988,7 @@ test "compare" {
     var str_a_longer = string(u8).init(a, test_base_a_longer);
     defer str_a_longer.deinit();
 
-    //std.debug.print("short.longer\n", .{});
-
     try std.testing.expectEqual(-1, str_a.compare(str_a_longer.str()));
-
-    //std.debug.print("longer.short\n", .{});
 
     try std.testing.expectEqual(1, str_a_longer.compare(str_a.str()));
 }
@@ -1019,46 +1005,36 @@ test "comparen" {
     defer str_b.deinit();
 
     // Given equal inputs, when comparing full ranges, then expect equality.
-    try std.testing.expectEqual(0, str_a.comparen(0, str_a.length(), str_a.str(), str_a.length()));
-
-    // std.debug.print("a.b\n", .{});
+    try std.testing.expectEqual(0, str_a.comparen(0, str_a.length(), str_a.str(), @intCast(str_a.length())));
 
     // symmetry: forward mismatch (a vs b) should be negative.
-    try std.testing.expectEqual(-1, str_a.comparen(0, str_a.length(), str_b.str(), str_b.length()));
-
-    //std.debug.print("a.a\n", .{});
+    try std.testing.expectEqual(-1, str_a.comparen(0, str_a.length(), str_b.str(), @intCast(str_b.length())));
 
     // Given equal inputs, when repeated for stability, then result remains equal.
-    try std.testing.expectEqual(0, str_a.comparen(0, str_a.length(), str_a.str(), str_a.length()));
-
-    //std.debug.print("b.a\n", .{});
+    try std.testing.expectEqual(0, str_a.comparen(0, str_a.length(), str_a.str(), @intCast(str_a.length())));
 
     // symmetry: reverse mismatch (b vs a) should be positive.
-    try std.testing.expectEqual(1, str_b.comparen(0, str_b.length(), str_a.str(), str_a.length()));
+    try std.testing.expectEqual(1, str_b.comparen(0, str_b.length(), str_a.str(), @intCast(str_a.length())));
 
     const test_base_a_longer = "A test string of great import.     \r\n 111111111111";
 
     var str_a_longer = string(u8).init(a, test_base_a_longer);
     defer str_a_longer.deinit();
 
-    //std.debug.print("short.longer\n", .{});
-
     // Given shared prefix with different total lengths, when n exceeds lhs window, then lhs exhaustion decides ordering.
-    try std.testing.expectEqual(-1, str_a.comparen(0, str_a.length(), str_a_longer.str(), str_a_longer.length()));
-
-    //std.debug.print("longer.short\n", .{});
+    try std.testing.expectEqual(-1, str_a.comparen(0, str_a.length(), str_a_longer.str(), @intCast(str_a_longer.length())));
 
     // long compared to shorter, only comparing shorter's length of characters
-    try std.testing.expectEqual(0, str_a_longer.comparen(0, str_a_longer.length(), str_a.str(), str_a.length()));
+    try std.testing.expectEqual(0, str_a_longer.comparen(0, str_a_longer.length(), str_a.str(), @intCast(str_a.length())));
 
     // boundary: pos out of range should return ArgumentOutOfRange.
     try std.testing.expectError(StringErrors.ArgumentOutOfRange, str_a.comparen(str_a.length() + 1, str_a.length(), str_a.str(), 1));
 
     // boundary: n longer than compared slice keeps exhaustion behavior stable.
-    try std.testing.expectEqual(-1, str_a.comparen(0, str_a.length(), str_a_longer.str(), str_a.length() + 1));
+    try std.testing.expectEqual(-1, str_a.comparen(0, str_a.length(), str_a_longer.str(), @intCast(str_a.length() + 1)));
 
     // boundary: non-zero pos changes the lhs comparison window.
-    try std.testing.expectEqual(-1, str_a.comparen(1, str_a.length(), str_a_longer.str(), str_b.length()));
+    try std.testing.expectEqual(-1, str_a.comparen(1, str_a.length(), str_a_longer.str(), @intCast(str_b.length())));
 
     // regression: equal 5-byte prefix must compare as equal regardless of longer suffix.
     try std.testing.expectEqual(0, str_a.comparen(0, 5, str_a_longer.str(), 5));
@@ -1117,7 +1093,20 @@ test "fromWriter" {}
 
 test "fromSlice" {}
 
-test "fromArrayList" {}
+test "fromArrayList" {
+    const T = u8;
+
+    const a = std.testing.allocator;
+
+    const test_base = "A test string of great import.     \r\n ";
+
+    var str_0 = string(T).init(a, test_base);
+    defer str_0.deinit();
+
+    var list_0: std.ArrayList(T) = .empty;
+    _ = &list_0;
+    str_0.from_arrayList(list_0);
+}
 
 //TODO: use string(T) as parameters instead of []const T
 //TODO: modules for each file.  test steps for each module
