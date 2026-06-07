@@ -8,6 +8,7 @@ pub const empty = "";
 pub fn string(T: type) type {
     return struct {
         const Self = @This();
+        const sentinel: T = 0;
 
         a: std.mem.Allocator,
         i: std.ArrayList(T) = .empty,
@@ -170,7 +171,7 @@ pub fn string(T: type) type {
             if (size > s.i.items.len and value != null) {
                 const growth = size - s.i.items.len;
                 const slice_ = s.i.addManyAsSlice(s.a, growth) catch unreachable;
-                @memset(slice_, value.?);
+                if (value) |c| @memset(slice_, c);
             } else if (size < s.i.items.len) {
                 s.i.shrinkAndFree(s.a, size);
             }
@@ -191,17 +192,6 @@ pub fn string(T: type) type {
             s.set_internal_buffers();
 
             return s;
-        }
-
-        //caller gets a newly allocated []const T that they must free
-        pub fn str(s: *Self) []T {
-            s.set_internal_buffers();
-            return s.raw.?;
-        }
-
-        pub fn strSentinel(s: *Self) ![:0]T {
-            s.set_internal_buffers();
-            return s.rawSentinel.?;
         }
 
         pub fn erase(s: *Self, index: usize, count: usize) *Self {
@@ -378,7 +368,7 @@ pub fn string(T: type) type {
         }
 
         inline fn set(s: *Self, value: []T) *Self {
-            s.i.clearAndFree(s.a);
+            s.i.clearRetainingCapacity();
             const copy_buffer = s.a.dupe(T, value) catch unreachable;
             defer s.a.free(copy_buffer);
             s.i.appendSlice(s.a, copy_buffer) catch unreachable;
@@ -386,11 +376,22 @@ pub fn string(T: type) type {
             return s;
         }
 
+        //caller gets a newly allocated []const T that they must free
+        pub fn str(s: *Self) []T {
+            s.set_internal_buffers();
+            return s.raw.?;
+        }
+
+        pub fn strSentinel(s: *Self) ![:sentinel]T {
+            s.set_internal_buffers();
+            return s.rawSentinel.?;
+        }
+
         inline fn set_internal_buffers(s: *Self) void {
             if (s.raw) |previous| s.a.free(previous);
             s.raw = s.a.dupe(T, s.i.items) catch unreachable;
             if (s.rawSentinel) |previous| s.a.free(previous);
-            s.rawSentinel = s.a.dupeSentinel(T, s.i.items, 0) catch unreachable;
+            s.rawSentinel = s.a.dupeSentinel(T, s.i.items, sentinel) catch unreachable;
         }
     };
 }
