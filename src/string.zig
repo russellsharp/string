@@ -43,10 +43,7 @@ pub fn string(T: type) type {
         }
 
         pub fn clone(s: Self) Self {
-            var c = Self{
-                .a = s.a,
-                .i = std.ArrayList(T).empty,
-            };
+            var c = Self{ .a = s.a, .i = std.ArrayList(T).empty, .raw = null, .rawSentinel = null };
             if (s.raw) |raw| c.raw = s.a.dupe(T, raw) catch unreachable;
             if (s.rawSentinel) |rawSentinel| c.rawSentinel = s.a.dupeSentinel(T, rawSentinel, 0) catch unreachable;
             c.i = s.i.clone(s.a) catch unreachable;
@@ -315,42 +312,48 @@ pub fn string(T: type) type {
             return -1;
         }
 
-        pub fn compare(s: *Self, b: []const T) i8 {
-            return s.comparen(0, s.i.items.len, b, s.i.items.len);
+        pub fn compare(s: *Self, b: []const T) !i8 {
+            return try s.comparen(0, s.i.items.len, b, @max(b.len, s.i.items.len));
         }
 
-        pub fn comparen(s: *Self, pos: usize, len: usize, b: []const T, n: usize) i8 {
-            _ = pos;
-            _ = len;
-            _ = len;
+        pub fn comparen(s: *Self, pos: usize, len: usize, b: []const T, n: usize) !i8 {
+            if (pos >= s.i.items.len) return StringErrors.ArgumentOutOfRange;
 
-            // const compared = s.i.items[pos..pos+len];
-            // if( n > b.len ) return StringErrors.InvalidArgument;
-            // if (pos > s.i.items.len) return StringErrors.ArgumentOutOfRange;
-            // if(subpos > b.len) return StringErrors.ArgumentOutOfRange
-            var i: usize = 0;
-            while (i <= b.len and i <= s.i.items.len) : (i += 1) {
-                if (i == s.i.items.len and i == b.len) {
-                    std.debug.print("ran out of both, equal\n", .{});
+            const compared = s.i.items[pos..std.math.clamp(pos + len, pos, s.i.items.len)];
+
+            const comparing = b[0..std.math.clamp(n, 0, b.len)];
+
+            var idx: usize = 0;
+            while (idx <= comparing.len and idx <= compared.len and idx < n) : (idx += 1) {
+                //if we run out of characters in both strings at the same length
+                if (idx == compared.len and idx == comparing.len) {
                     return 0;
-                } else if (i == s.i.items.len and i < b.len) {
-                    std.debug.print("ran out of compared\n", .{});
+                } else if (idx == compared.len and idx < comparing.len) {
+                    //haven't reached n, exhausted comparedcharacters
+                    return -1;
+                } else if (idx == comparing.len and idx < compared.len) {
+                    //haven't reached n, exhausted comparing characters
                     return 1;
-                } else if (i == b.len and i < s.i.items.len) {
-                    std.debug.print("ran out of comparing\n", .{});
+                }
+
+                if (idx >= compared.len) {
+                    //compared characters of both but reached end of compared
+                    return -1;
+                } else if (idx >= comparing.len) {
+                    //compared characters of both but reached end of comparing
+                    return 1;
+                }
+
+                const c = compared[idx];
+
+                // compare characters from  each string
+                if (c > comparing[idx]) {
+                    return 1;
+                } else if (comparing[idx] > c) {
                     return -1;
                 }
 
-                const c = s.i.items[i];
-                std.debug.print("{d}: a -> '{c}',  b -> '{c}'\n", .{ i, c, b[i] });
-
-                if (c > b[i]) {
-                    return 1;
-                } else if (b[i] > c) {
-                    return -1;
-                }
-
-                if (i == n) return 0;
+                if (idx == n) return 0;
             }
             return 0;
         }
@@ -385,6 +388,18 @@ pub fn string(T: type) type {
         pub fn strSentinel(s: *Self) [:sentinel]T {
             s.set_internal_buffers();
             return s.rawSentinel.?;
+        }
+
+        //set contents of buffer and return buffer length, caller is responsible for freeing buffer
+        pub fn stru(s: *Self, buffer: []T) usize {
+            buffer = s.a.dupe(T, s.i.items);
+            return buffer.len;
+        }
+
+        //set contents of buffer with sentinel value and return buffer length, caller is responsible for freeing buffer
+        pub fn strSentinelu(s: *Self, buffer: []T) usize {
+            buffer = s.a.dupeSentinel(T, s.i.items, sentinel);
+            return buffer.len;
         }
 
         inline fn set_internal_buffers(s: *Self) void {
@@ -556,7 +571,7 @@ test "strSentinel" {
     var str_0 = string(u8).init(std.testing.allocator, "content for your pleasure");
     defer str_0.deinit();
 
-    const sentineled = try str_0.strSentinel();
+    const sentineled = str_0.strSentinel();
     const expectedSentineled = "content for your pleasure".*;
     try std.testing.expectEqualStrings(&expectedSentineled, sentineled);
     try std.testing.expectEqual('e', sentineled[24]);
@@ -966,15 +981,15 @@ test "compare" {
     var str_b = string(u8).init(a, test_base_b);
     defer str_b.deinit();
 
-    std.debug.print("a.b\n", .{});
+    //std.debug.print("a.b\n", .{});
 
     try std.testing.expectEqual(-1, str_a.compare(str_b.str()));
 
-    std.debug.print("a.a\n", .{});
+    //std.debug.print("a.a\n", .{});
 
     try std.testing.expectEqual(0, str_a.compare(str_a.str()));
 
-    std.debug.print("b.a\n", .{});
+    //std.debug.print("b.a\n", .{});
 
     try std.testing.expectEqual(1, str_b.compare(str_a.str()));
 
@@ -983,27 +998,100 @@ test "compare" {
     var str_a_longer = string(u8).init(a, test_base_a_longer);
     defer str_a_longer.deinit();
 
-    std.debug.print("short.longer\n", .{});
+    //std.debug.print("short.longer\n", .{});
 
-    try std.testing.expectEqual(1, str_a.compare(str_a_longer.str()));
+    try std.testing.expectEqual(-1, str_a.compare(str_a_longer.str()));
 
-    std.debug.print("longer.short\n", .{});
+    //std.debug.print("longer.short\n", .{});
 
-    try std.testing.expectEqual(-1, str_a_longer.compare(str_a.str()));
+    try std.testing.expectEqual(1, str_a_longer.compare(str_a.str()));
 }
 
 test "comparen" {
-    // const a = std.testing.allocator;
+    const a = std.testing.allocator;
 
-    // const test_base_a = "A test string of great import.     \r\n ";
-    // const test_base_b = "A test string of lesser import.     \r\n ";
+    const test_base_a = "A test string of great import.     \r\n ";
+    const test_base_b = "A test string of lesser import.     \r\n ";
 
-    // var str_a = string(u8).init(a, test_base_a);
-    // defer str_a.deinit();
-    // var str_b = string(u8).init(a, test_base_b);
-    // defer str_b.deinit();
+    var str_a = string(u8).init(a, test_base_a);
+    defer str_a.deinit();
+    var str_b = string(u8).init(a, test_base_b);
+    defer str_b.deinit();
 
-    // std.testing.expect(!str_a.comparen(str_b));
+    // Given equal inputs, when comparing full ranges, then expect equality.
+    try std.testing.expectEqual(0, str_a.comparen(0, str_a.length(), str_a.str(), str_a.length()));
+
+    // std.debug.print("a.b\n", .{});
+
+    // symmetry: forward mismatch (a vs b) should be negative.
+    try std.testing.expectEqual(-1, str_a.comparen(0, str_a.length(), str_b.str(), str_b.length()));
+
+    //std.debug.print("a.a\n", .{});
+
+    // Given equal inputs, when repeated for stability, then result remains equal.
+    try std.testing.expectEqual(0, str_a.comparen(0, str_a.length(), str_a.str(), str_a.length()));
+
+    //std.debug.print("b.a\n", .{});
+
+    // symmetry: reverse mismatch (b vs a) should be positive.
+    try std.testing.expectEqual(1, str_b.comparen(0, str_b.length(), str_a.str(), str_a.length()));
+
+    const test_base_a_longer = "A test string of great import.     \r\n 111111111111";
+
+    var str_a_longer = string(u8).init(a, test_base_a_longer);
+    defer str_a_longer.deinit();
+
+    //std.debug.print("short.longer\n", .{});
+
+    // Given shared prefix with different total lengths, when n exceeds lhs window, then lhs exhaustion decides ordering.
+    try std.testing.expectEqual(-1, str_a.comparen(0, str_a.length(), str_a_longer.str(), str_a_longer.length()));
+
+    //std.debug.print("longer.short\n", .{});
+
+    // long compared to shorter, only comparing shorter's length of characters
+    try std.testing.expectEqual(0, str_a_longer.comparen(0, str_a_longer.length(), str_a.str(), str_a.length()));
+
+    // boundary: pos out of range should return ArgumentOutOfRange.
+    try std.testing.expectError(StringErrors.ArgumentOutOfRange, str_a.comparen(str_a.length() + 1, str_a.length(), str_a.str(), 1));
+
+    // boundary: n longer than compared slice keeps exhaustion behavior stable.
+    try std.testing.expectEqual(-1, str_a.comparen(0, str_a.length(), str_a_longer.str(), str_a.length() + 1));
+
+    // boundary: non-zero pos changes the lhs comparison window.
+    try std.testing.expectEqual(-1, str_a.comparen(1, str_a.length(), str_a_longer.str(), str_b.length()));
+
+    // regression: equal 5-byte prefix must compare as equal regardless of longer suffix.
+    try std.testing.expectEqual(0, str_a.comparen(0, 5, str_a_longer.str(), 5));
+
+    var str_small = string(u8).init(a, "abc");
+    defer str_small.deinit();
+
+    // len == 0 and n == 0 yields two empty windows.
+    try std.testing.expectEqual(0, str_small.comparen(0, 0, "xyz", 0));
+
+    // len == 0 but n > 0 means compared window exhausts first.
+    try std.testing.expectEqual(-1, str_small.comparen(0, 0, "xyz", 2));
+
+    // n == 0 but len > 0 means comparing window exhausts first.
+    try std.testing.expectEqual(0, str_small.comparen(0, 2, "xyz", 0));
+
+    // n > b.len should clamp to b.len and compare only available rhs bytes, but still exhaust rhs
+    try std.testing.expectEqual(1, str_small.comparen(0, 3, "ab", 9));
+
+    // a->substr(pos, len).compare(b(s, n))
+    var str_cpp = string(u8).init(a, "apples");
+    defer str_cpp.deinit();
+
+    // equal prefixes over n chars should compare equal.
+    try std.testing.expectEqual(0, str_cpp.comparen(0, str_cpp.length(), "applecore", 5));
+
+    // len extending past end should clamp compared substring and still compare equal.
+    try std.testing.expectEqual(0, str_cpp.comparen(1, 99, "pplesauce", 5));
+
+    var str_cpp_shorter = string(u8).init(a, "apple");
+    defer str_cpp_shorter.deinit();
+
+    try std.testing.expectEqual(-1, str_cpp_shorter.comparen(0, str_cpp_shorter.length(), "applepie", 8));
 }
 
 test "span and slice" {
