@@ -219,6 +219,11 @@ pub fn string(T: type) type {
             return s.i.items.len == 0;
         }
 
+        pub fn fill(s: *Self) *Self {
+            _ = s;
+            unreachable;
+        }
+
         pub fn clear(s: *Self) *Self {
             defer s.set_internal_buffers();
             return s.set(empty_buffer);
@@ -263,23 +268,27 @@ pub fn string(T: type) type {
             return s;
         }
 
-        pub fn replace(s: *Self, index: usize, count: usize, buffer: []const u8) *Self {
+        pub fn replace(s: *Self, pos: usize, len: i64, buffer: []const T) !*Self {
+            return try replacen(s, pos, len, buffer, 0, @intCast(buffer.len));
+        }
+
+        pub fn replacen(s: *Self, pos: usize, len: i64, buffer: []const T, subpos: usize, sublen: i64) !*Self {
+            if (pos >= s.i.items.len) return StringErrors.ArgumentOutOfRange;
+            if (subpos >= buffer.len) return StringErrors.ArgumentOutOfRange;
+
+            const replacment_len = if (sublen == npos) buffer.len else @as(usize, @intCast(sublen));
+            const replace_original_len: usize = if (len == npos) s.i.items.len - 1 else @intCast(len);
+            const replacement_buffer = buffer[subpos..std.math.clamp(subpos + replacment_len, subpos, buffer.len)];
+
             var after: std.ArrayList(T) = .empty;
             defer after.deinit(s.a);
 
-            var s_idx: usize = 0;
-            while (s_idx <= s.i.items.len) : (s_idx += 1) {
-                //if we are before the index of replacement
-                if (s_idx < index or
-                    // if we are after the substr replacement and still have str left
-                    (s_idx >= index + @min(buffer.len, count)) and s_idx < s.i.items.len)
-                {
-                    after.append(s.a, s.i.items[s_idx]) catch unreachable;
-                } else if (s_idx == index) {
-                    //insert substr at index
-                    after.appendSlice(s.a, buffer) catch unreachable;
-                }
-            }
+            // characters before replacement
+            after.appendSlice(s.a, s.i.items[0..pos]) catch unreachable;
+            // characters from replacement
+            after.appendSlice(s.a, replacement_buffer) catch unreachable;
+            // characters after replacement, and after len parameter to replace N characters from the original
+            after.appendSlice(s.a, s.i.items[std.math.clamp(pos + replace_original_len, pos, s.i.items.len)..s.i.items.len]) catch unreachable;
 
             s.i.deinit(s.a);
             s.i = cloneList(s.a, T, after) catch unreachable;
@@ -710,7 +719,7 @@ test "replace" {
     var str_0 = string(u8).init(std.testing.allocator, original);
     defer str_0.deinit();
 
-    _ = str_0.replace(9, 5, "n example");
+    _ = try str_0.replace(9, 5, "n example");
 
     try std.testing.expectEqualStrings("this is an example string.", str_0.str());
     try std.testing.expectEqual(26, str_0.length());
@@ -719,7 +728,7 @@ test "replace" {
     var str_1 = string(u8).init(std.testing.allocator, original);
     defer str_1.deinit();
 
-    _ = str_1.replace(21, 5, " and example");
+    _ = try str_1.replace(21, 5, " and example");
 
     try std.testing.expectEqualStrings("this is a test string and example", str_1.str());
     try std.testing.expectEqual(33, str_1.length());
@@ -728,7 +737,7 @@ test "replace" {
     var str_2 = string(u8).init(std.testing.allocator, original);
     defer str_2.deinit();
 
-    _ = str_2.replace(15, 10, "for you");
+    _ = try str_2.replace(15, 10, "for you");
 
     try std.testing.expectEqualStrings("this is a test for you", str_2.str());
     try std.testing.expectEqual(22, str_2.length());
@@ -737,19 +746,71 @@ test "replace" {
     var str_3 = string(u8).init(std.testing.allocator, "content for your pleasure");
     defer str_3.deinit();
 
-    _ = str_3.replace(25, 5, " and consumption");
+    _ = try str_3.replace(24, 5, "e and consumption");
 
     try std.testing.expectEqualStrings("content for your pleasure and consumption", str_3.str());
     try std.testing.expectEqual(41, str_3.length());
 
-    //end of str, substr shorter than index + count
+    //end of str, substr shorter than pos + count
     var str_4 = string(u8).init(std.testing.allocator, "content for your pleasure");
     defer str_4.deinit();
 
-    _ = str_4.replace(25, 5, "s");
+    _ = try str_4.replace(24, 5, "es");
 
     try std.testing.expectEqualStrings("content for your pleasures", str_4.str());
     try std.testing.expectEqual(26, str_4.length());
+
+    try std.testing.expectError(StringErrors.ArgumentOutOfRange, str_4.replace(1234, 4, "position beyond string length"));
+}
+test "replacen" {
+    const original = "this is a test string.";
+
+    //at beginning and within string
+    var str_0 = string(u8).init(std.testing.allocator, original);
+    defer str_0.deinit();
+
+    _ = try str_0.replacen(9, 5, "n example", 0, "n_example".len);
+
+    try std.testing.expectEqualStrings("this is an example string.", str_0.str());
+    try std.testing.expectEqual(26, str_0.length());
+
+    //within string, substr beyond end of str
+    var str_1 = string(u8).init(std.testing.allocator, original);
+    defer str_1.deinit();
+
+    _ = try str_1.replacen(21, 5, "   and example", 2, "   and example".len - 2);
+    try std.testing.expectEqualStrings("this is a test string and example", str_1.str());
+    try std.testing.expectEqual(33, str_1.length());
+
+    //within string, replacement string shorter than sublen
+    var str_2 = string(u8).init(std.testing.allocator, original);
+    defer str_2.deinit();
+
+    _ = try str_2.replacen(15, 10, "    for you", 4, "    this is a test for you".len);
+
+    try std.testing.expectEqualStrings("this is a test for you", str_2.str());
+    try std.testing.expectEqual(22, str_2.length());
+
+    //end of str, substr longer than index + count
+    var str_3 = string(u8).init(std.testing.allocator, "content for your pleasure");
+    defer str_3.deinit();
+
+    _ = try str_3.replacen(24, 5, "e and consumption", 0, -1);
+
+    try std.testing.expectEqualStrings("content for your pleasure and consumption", str_3.str());
+    try std.testing.expectEqual(41, str_3.length());
+
+    //end of str, substr shorter than pos + count
+    var str_4 = string(u8).init(std.testing.allocator, "content for your pleasure");
+    defer str_4.deinit();
+
+    _ = try str_4.replacen(24, 5, "es", 0, -1);
+
+    try std.testing.expectEqualStrings("content for your pleasures", str_4.str());
+    try std.testing.expectEqual(26, str_4.length());
+
+    try std.testing.expectError(StringErrors.ArgumentOutOfRange, str_4.replacen(1234, @intCast(str_4.length() + 1), "position beyond string length", 0, -1));
+    try std.testing.expectError(StringErrors.ArgumentOutOfRange, str_4.replacen(1234, 4, "position beyond string length", 0, "position beyond string length".len));
 }
 
 test "find" {
