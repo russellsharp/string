@@ -3,7 +3,7 @@ const cloneList = @import("clone.zig").cloneArrayList;
 
 const StringErrors = error{ InvalidArgument, EmptyString, ArgumentOutOfRange };
 
-pub const empty = "";
+pub const empty_buffer = "";
 
 pub fn string(T: type) type {
     return struct {
@@ -32,6 +32,14 @@ pub fn string(T: type) type {
             s.i.appendSlice(a, copy_buffer) catch unreachable;
             s.set_internal_buffers();
             return s;
+        }
+
+        pub fn from_arrayList(a: std.mem.Allocator, U: type, list: std.ArrayList(U)) string(U) {
+            return .init(a, list.items);
+        }
+
+        pub fn from_slice(a: std.mem.Allocator, U: type, buffer: []const U) string(U) {
+            return .init(a, buffer);
         }
 
         pub fn deinit(s: *Self) void {
@@ -155,13 +163,17 @@ pub fn string(T: type) type {
             return s.i.capacity;
         }
 
-        pub fn is_empty(s: *Self) bool {
+        pub fn data(s: *Self) []const T {
+            return s.str();
+        }
+
+        pub fn empty(s: *Self) bool {
             return s.i.items.len == 0;
         }
 
         pub fn clear(s: *Self) *Self {
             defer s.set_internal_buffers();
-            return s.set(empty);
+            return s.set(empty_buffer);
         }
 
         pub fn resize(s: *Self, size: usize, value: ?T) *Self {
@@ -174,6 +186,10 @@ pub fn string(T: type) type {
             }
             s.set_internal_buffers();
             return s;
+        }
+
+        pub fn assign(s: *Self, buffer: []const T) *Self {
+            return s.set(buffer);
         }
 
         pub fn at(s: *Self, pos: usize) !T {
@@ -359,7 +375,7 @@ pub fn string(T: type) type {
         }
 
         pub fn slice(s: *Self, index: usize, len: usize) string(T) {
-            if (index >= s.i.items.len) return string(T).init(s.a, empty);
+            if (index >= s.i.items.len) return string(T).init(s.a, empty_buffer);
             const span_ = s.a.dupe(T, s.i.items[index..std.math.clamp(len, 0, s.i.items.len)]) catch unreachable;
             defer s.a.free(span_);
             const str_span = string(T).init(s.a, span_);
@@ -408,7 +424,7 @@ pub fn string(T: type) type {
 }
 
 test "instantiation" {
-    var str = string(u8).init(std.testing.allocator, empty);
+    var str = string(u8).init(std.testing.allocator, empty_buffer);
     defer str.deinit();
     _ = &str;
 }
@@ -429,19 +445,19 @@ test "copy constructor" {
 }
 
 test "empty string error" {
-    var str = string(u8).init(std.testing.allocator, empty);
+    var str = string(u8).init(std.testing.allocator, empty_buffer);
     defer str.deinit();
     const toTrim = "\n\r";
     try std.testing.expectError(StringErrors.EmptyString, str.trimRight(toTrim));
 }
 
 test "empty string" {
-    try std.testing.expectEqualStrings("", empty);
-    try std.testing.expectEqual(0, empty.len);
+    try std.testing.expectEqualStrings("", empty_buffer);
+    try std.testing.expectEqual(0, empty_buffer.len);
 }
 
 test "append" {
-    var str = string(u8).init(std.testing.allocator, empty);
+    var str = string(u8).init(std.testing.allocator, empty_buffer);
     defer str.deinit();
     _ = str.append("hi");
     try std.testing.expectEqualStrings("hi", str.str());
@@ -492,13 +508,13 @@ test "substr(index, length)" {
     var str_2 = string(u8).init(std.testing.allocator, "01234567");
     defer str_2.deinit();
     const sub_beyond = try str_2.substr(55, 8);
-    try std.testing.expectEqualStrings(empty, sub_beyond);
+    try std.testing.expectEqualStrings(empty_buffer, sub_beyond);
 }
 
 test "length" {
     const a = std.testing.allocator;
 
-    var str_0 = string(u8).init(a, empty);
+    var str_0 = string(u8).init(a, empty_buffer);
     defer str_0.deinit();
 
     try std.testing.expectEqual(0, str_0.length());
@@ -517,11 +533,11 @@ test "capacity" {
 }
 
 test "is_empty" {
-    var str_0 = string(u8).init(std.testing.allocator, empty);
+    var str_0 = string(u8).init(std.testing.allocator, empty_buffer);
     defer str_0.deinit();
 
     try std.testing.expectEqual(0, str_0.length());
-    try std.testing.expect(str_0.is_empty());
+    try std.testing.expect(str_0.empty());
 }
 
 test "clear" {
@@ -529,12 +545,12 @@ test "clear" {
     defer str_0.deinit();
 
     try std.testing.expectEqual("content for your pleasure".len, str_0.length());
-    try std.testing.expect(!str_0.is_empty());
+    try std.testing.expect(!str_0.empty());
 
     _ = str_0.clear();
 
     try std.testing.expectEqual(0, str_0.length());
-    try std.testing.expect(str_0.is_empty());
+    try std.testing.expect(str_0.empty());
 }
 
 test "resize" {
@@ -1089,24 +1105,47 @@ test "span and slice" {
     try std.testing.expectEqual(4, span.length());
 }
 
-test "fromWriter" {}
+test "from_writer" {}
 
-test "fromSlice" {}
+test "from_slice" {
+    const T = u8;
 
-test "fromArrayList" {
+    const a = std.testing.allocator;
+
+    const test_base = "A test string of great import.     \r\n ";
+    var str_0 = string(T).from_slice(a, T, empty_buffer);
+    defer str_0.deinit();
+    try std.testing.expectEqual(0, str_0.length());
+
+    var str_1 = string(T).from_slice(a, T, test_base);
+    defer str_1.deinit();
+    try std.testing.expectEqual(test_base.len, str_1.length());
+    try std.testing.expectEqual(0, str_1.compare(test_base));
+    try std.testing.expectEqualStrings(test_base, str_1.str());
+}
+
+test "from_arrayList" {
     const T = u8;
 
     const a = std.testing.allocator;
 
     const test_base = "A test string of great import.     \r\n ";
 
-    var str_0 = string(T).init(a, test_base);
-    defer str_0.deinit();
-
     var list_0: std.ArrayList(T) = .empty;
-    _ = &list_0;
-    str_0.from_arrayList(list_0);
+    defer list_0.deinit(a);
+    var str_0 = string(T).from_arrayList(a, T, list_0);
+    defer str_0.deinit();
+    try std.testing.expectEqual(0, str_0.length());
+
+    var list_1: std.ArrayList(T) = .empty;
+    defer list_1.deinit(a);
+
+    try list_1.appendSlice(a, test_base);
+    var str_1 = string(T).from_arrayList(a, T, list_1);
+    defer str_1.deinit();
+    try std.testing.expectEqual(test_base.len, str_1.length());
+    try std.testing.expectEqual(0, str_1.compare(test_base));
+    try std.testing.expectEqualStrings(test_base, str_1.str());
 }
 
 //TODO: use string(T) as parameters instead of []const T
-//TODO: modules for each file.  test steps for each module
