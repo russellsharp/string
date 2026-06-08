@@ -38,11 +38,11 @@ pub fn string(T: type) type {
             return s;
         }
 
-        pub fn from_arrayList(a: std.mem.Allocator, U: type, list: std.ArrayList(U)) string(U) {
+        pub fn from_arrayList(a: std.mem.Allocator, list: std.ArrayList(T)) Self {
             return .init(a, list.items);
         }
 
-        pub fn from_slice(a: std.mem.Allocator, U: type, buffer: []const U) string(U) {
+        pub fn from_slice(a: std.mem.Allocator, buffer: []const T) Self {
             return .init(a, buffer);
         }
 
@@ -288,7 +288,7 @@ pub fn string(T: type) type {
             return s;
         }
 
-        pub fn find(s: *Self, needle: []const u8, index: usize, needle_len: usize) !i64 {
+        pub fn find(s: *Self, needle: []const T, index: usize, needle_len: usize) !i64 {
             if (index >= s.i.items.len) return StringErrors.InvalidArgument;
             if (needle_len > needle.len) return StringErrors.InvalidArgument;
 
@@ -302,13 +302,13 @@ pub fn string(T: type) type {
             return if (found != null) @intCast(found.?) else @as(i64, -1);
         }
 
-        pub fn rfind(s: *Self, needle: []const u8, index: usize) !i64 {
+        pub fn rfind(s: *Self, needle: []const T, index: usize) !i64 {
             const haystack_ = s.i.items[0..std.math.clamp(index, 0, s.i.items.len)];
             const idx = std.mem.findLast(T, haystack_, needle);
             return if (idx) |i| @as(i64, @intCast(i)) else -1;
         }
 
-        pub fn find_first_of(s: *Self, needle: []const u8, index: usize, n: usize) !i64 {
+        pub fn find_first_of(s: *Self, needle: []const T, index: usize, n: usize) !i64 {
             if (index >= s.i.items.len) return -1;
 
             const focus = s.i.items[index..];
@@ -322,7 +322,7 @@ pub fn string(T: type) type {
             return -1;
         }
 
-        pub fn find_last_of(s: *Self, needle: []const u8, index: usize, n: usize) !i64 {
+        pub fn find_last_of(s: *Self, needle: []const T, index: usize, n: usize) !i64 {
             const haystack_ = s.i.items[0..std.math.clamp(index, 0, s.i.items.len)];
             const needle_ = needle[0..n];
 
@@ -336,7 +336,7 @@ pub fn string(T: type) type {
             return -1;
         }
 
-        pub fn find_first_not_of(s: *Self, notlist: []const u8, index: usize, n: usize) !i64 {
+        pub fn find_first_not_of(s: *Self, notlist: []const T, index: usize, n: usize) !i64 {
             if (index >= s.i.items.len) return -1;
 
             const haystack_ = s.i.items[index..];
@@ -350,7 +350,7 @@ pub fn string(T: type) type {
             return -1;
         }
 
-        pub fn find_last_not_of(s: *Self, needle: []const u8, index: usize, n: usize) !i64 {
+        pub fn find_last_not_of(s: *Self, needle: []const T, index: usize, n: usize) !i64 {
             const haystack_ = s.i.items[0..std.math.clamp(index, 0, s.i.items.len)];
             const needle_ = needle[0..n];
 
@@ -409,7 +409,7 @@ pub fn string(T: type) type {
 
         pub fn slice(s: *Self, index: usize, len: usize) ![]T {
             if (index >= s.i.items.len) return StringErrors.ArgumentOutOfRange;
-            return s.a.dupe(T, s.i.items[index..std.math.clamp(len, 0, s.i.items.len)]) catch unreachable;
+            return s.a.dupe(T, s.i.items[index..std.math.clamp(index + len, 0, s.i.items.len)]) catch unreachable;
         }
 
         pub fn swap(s: *Self, other: *Self) !void {
@@ -1163,6 +1163,12 @@ test "span and slice" {
     try std.testing.expectEqualStrings("A te", slice);
     try std.testing.expectEqual(4, slice.len);
 
+    const slice_beyond = try str_0.slice(0, 55);
+    defer a.free(slice_beyond);
+
+    try std.testing.expectEqualStrings(test_base, slice_beyond);
+    try std.testing.expectEqual(test_base.len, slice_beyond.len);
+
     const span = try str_0.span(0, 4);
     defer a.free(span);
 
@@ -1172,7 +1178,7 @@ test "span and slice" {
     try std.testing.expectError(StringErrors.ArgumentOutOfRange, str_0.slice(50, test_base.len));
 }
 
-test "from_writer" {}
+const Io = std.Io;
 
 test "from_slice" {
     const T = u8;
@@ -1180,11 +1186,11 @@ test "from_slice" {
     const a = std.testing.allocator;
 
     const test_base = "A test string of great import.     \r\n ";
-    var str_0 = string(T).from_slice(a, T, empty_buffer);
+    var str_0 = string(T).from_slice(a, empty_buffer);
     defer str_0.deinit();
     try std.testing.expectEqual(0, str_0.length());
 
-    var str_1 = string(T).from_slice(a, T, test_base);
+    var str_1 = string(T).from_slice(a, test_base);
     defer str_1.deinit();
     try std.testing.expectEqual(test_base.len, str_1.length());
     try std.testing.expectEqual(0, str_1.compare(test_base));
@@ -1200,7 +1206,7 @@ test "from_arrayList" {
 
     var list_0: std.ArrayList(T) = .empty;
     defer list_0.deinit(a);
-    var str_0 = string(T).from_arrayList(a, T, list_0);
+    var str_0 = string(T).from_arrayList(a, list_0);
     defer str_0.deinit();
     try std.testing.expectEqual(0, str_0.length());
 
@@ -1208,7 +1214,7 @@ test "from_arrayList" {
     defer list_1.deinit(a);
 
     try list_1.appendSlice(a, test_base);
-    var str_1 = string(T).from_arrayList(a, T, list_1);
+    var str_1 = string(T).from_arrayList(a, list_1);
     defer str_1.deinit();
     try std.testing.expectEqual(test_base.len, str_1.length());
     try std.testing.expectEqual(0, str_1.compare(test_base));
