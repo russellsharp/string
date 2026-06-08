@@ -1,7 +1,7 @@
 const std = @import("std");
 const cloneList = @import("clone.zig").cloneArrayList;
 
-const StringErrors = error{ InvalidArgument, EmptyString, ArgumentOutOfRange };
+const StringErrors = error{ InvalidArgument, EmptyString, ArgumentOutOfRange, NullArguement };
 
 pub const empty_buffer = "";
 
@@ -9,16 +9,20 @@ pub fn string(T: type) type {
     return struct {
         const Self = @This();
         const sentinel: T = 0;
+        const npos: i64 = -1;
 
         a: std.mem.Allocator,
         i: std.ArrayList(T) = .empty,
         raw: ?[]T = null,
         rawSentinel: ?[:0]T = null,
 
+        _disposed: bool = false,
+
         pub fn init(a: std.mem.Allocator, initial: ?[]const T) Self {
             var s = Self{
                 .a = a,
                 .i = std.ArrayList(T).empty,
+                ._disposed = false,
             };
             if (initial) |value| _ = s.i.appendSlice(a, value) catch unreachable;
             s.set_internal_buffers();
@@ -26,7 +30,7 @@ pub fn string(T: type) type {
         }
 
         pub fn copy(a: std.mem.Allocator, source: string(T)) Self {
-            var s = Self{ .a = a, .i = .empty };
+            var s = Self{ .a = a, .i = .empty, ._disposed = false };
             const copy_buffer = a.dupe(T, source.i.items) catch unreachable;
             defer a.free(copy_buffer);
             s.i.appendSlice(a, copy_buffer) catch unreachable;
@@ -43,15 +47,19 @@ pub fn string(T: type) type {
         }
 
         pub fn deinit(s: *Self) void {
-            s.i.deinit(s.a);
-            if (s.raw) |buffer| s.a.free(buffer);
-            s.raw = null;
-            if (s.rawSentinel) |buffer| s.a.free(buffer);
-            s.rawSentinel = null;
+            if (!s._disposed) {
+                s._disposed = true;
+
+                s.i.deinit(s.a);
+                if (s.raw) |buffer| s.a.free(buffer);
+                s.raw = null;
+                if (s.rawSentinel) |buffer| s.a.free(buffer);
+                s.rawSentinel = null;
+            }
         }
 
         pub fn clone(s: Self) Self {
-            var c = Self{ .a = s.a, .i = std.ArrayList(T).empty, .raw = null, .rawSentinel = null };
+            var c = Self{ .a = s.a, .i = std.ArrayList(T).empty, .raw = null, .rawSentinel = null, ._disposed = false };
             if (s.raw) |raw| c.raw = s.a.dupe(T, raw) catch unreachable;
             if (s.rawSentinel) |rawSentinel| c.rawSentinel = s.a.dupeSentinel(T, rawSentinel, 0) catch unreachable;
             c.i = s.i.clone(s.a) catch unreachable;
@@ -62,6 +70,11 @@ pub fn string(T: type) type {
             s.i.appendSlice(s.a, suffix) catch unreachable;
             s.set_internal_buffers();
             return s;
+        }
+
+        pub fn back(s: *Self) !?T {
+            if (s.empty()) return StringErrors.EmptyString;
+            return s.i.items[s.i.items.len - 1];
         }
 
         pub fn trimRight(s: *Self, charactersToTrim: []const T) ![]T {
@@ -140,7 +153,7 @@ pub fn string(T: type) type {
         }
 
         pub fn substr(s: *Self, index: usize, count: usize) ![]T {
-            if (count > s.i.items.len) return StringErrors.InvalidArgument;
+            if (count > s.i.items.len) return StringErrors.ArgumentOutOfRange;
 
             var i: usize = index;
             var subList: std.ArrayList(T) = .empty;
@@ -163,6 +176,48 @@ pub fn string(T: type) type {
             return s.i.capacity;
         }
 
+        pub fn compare(s: *Self, b: []const T) !i8 {
+            return try s.comparen(0, s.i.items.len, b, -1);
+        }
+
+        pub fn comparen(s: *Self, pos: usize, len: usize, b: []const T, n: i32) !i8 {
+            if (pos >= s.i.items.len) return StringErrors.ArgumentOutOfRange;
+            const num_of_chars: usize = @intCast(if (n == npos) @max(s.i.items.len, b.len) else @as(u64, @intCast(n)));
+            const compared = s.i.items[pos..std.math.clamp(pos + len, pos, s.i.items.len)];
+            const comparing = b[0..std.math.clamp(num_of_chars, 0, b.len)];
+
+            var idx: usize = 0;
+            while (idx < comparing.len and idx < compared.len and idx < num_of_chars) : (idx += 1) {
+                const c = compared[idx];
+                // compare characters from  each string
+                if (c > comparing[idx]) {
+                    return 1;
+                } else if (comparing[idx] > c) {
+                    return -1;
+                }
+            }
+
+            if (idx == num_of_chars) {
+                return 0;
+            }
+
+            //if we run out of characters in both strings at the same length
+            if (idx == compared.len and idx == comparing.len) {
+                return 0;
+            }
+
+            //haven't reached n, exhausted comparedcharacters
+            if (idx == compared.len and idx < comparing.len) {
+                return -1;
+            }
+
+            //haven't reached n, exhausted comparing characters
+            if (idx == comparing.len and idx < compared.len) {
+                return 1;
+            }
+            return 0;
+        }
+
         pub fn data(s: *Self) []const T {
             return s.str();
         }
@@ -174,18 +229,6 @@ pub fn string(T: type) type {
         pub fn clear(s: *Self) *Self {
             defer s.set_internal_buffers();
             return s.set(empty_buffer);
-        }
-
-        pub fn resize(s: *Self, size: usize, value: ?T) *Self {
-            if (size > s.i.items.len and value != null) {
-                const growth = size - s.i.items.len;
-                const slice_ = s.i.addManyAsSlice(s.a, growth) catch unreachable;
-                if (value) |c| @memset(slice_, c);
-            } else if (size < s.i.items.len) {
-                s.i.shrinkAndFree(s.a, size);
-            }
-            s.set_internal_buffers();
-            return s;
         }
 
         pub fn assign(s: *Self, buffer: []const T) *Self {
@@ -328,61 +371,67 @@ pub fn string(T: type) type {
             return -1;
         }
 
-        pub fn compare(s: *Self, b: []const T) !i8 {
-            return try s.comparen(0, s.i.items.len, b, -1);
+        pub fn get_allocator(s: *Self) std.mem.Allocator {
+            return s.a;
         }
 
-        pub fn comparen(s: *Self, pos: usize, len: usize, b: []const T, n: i32) !i8 {
-            if (pos >= s.i.items.len) return StringErrors.ArgumentOutOfRange;
-            const num_of_chars: usize = @intCast(if (n < 0) @max(s.i.items.len, b.len) else @as(u64, @intCast(n)));
-            const compared = s.i.items[pos..std.math.clamp(pos + len, pos, s.i.items.len)];
-            const comparing = b[0..std.math.clamp(num_of_chars, 0, b.len)];
-
-            var idx: usize = 0;
-            while (idx < comparing.len and idx < compared.len and idx < num_of_chars) : (idx += 1) {
-                const c = compared[idx];
-                // compare characters from  each string
-                if (c > comparing[idx]) {
-                    return 1;
-                } else if (comparing[idx] > c) {
-                    return -1;
-                }
-            }
-
-            if (idx == num_of_chars) {
-                return 0;
-            }
-
-            //if we run out of characters in both strings at the same length
-            if (idx == compared.len and idx == comparing.len) {
-                return 0;
-            }
-
-            //haven't reached n, exhausted comparedcharacters
-            if (idx == compared.len and idx < comparing.len) {
-                return -1;
-            }
-
-            //haven't reached n, exhausted comparing characters
-            if (idx == comparing.len and idx < compared.len) {
-                return 1;
-            }
-            return 0;
+        pub fn pop_back(s: *Self) ?T {
+            const element = s.i.pop();
+            s.set_internal_buffers();
+            return element;
         }
 
-        pub fn span(s: *Self, index: usize, len: usize) string(T) {
+        pub fn push_back(s: *Self, element: T) *Self {
+            s.i.append(s.a, element) catch unreachable;
+            s.set_internal_buffers();
+            return s;
+        }
+
+        pub fn reserve(s: *Self, size: usize) *Self {
+            s.i.ensureTotalCapacity(s.a, size) catch unreachable;
+            return s;
+        }
+
+        pub fn resize(s: *Self, size: usize, value: ?T) *Self {
+            if (size > s.i.items.len and value != null) {
+                const growth = size - s.i.items.len;
+                const slice_ = s.i.addManyAsSlice(s.a, growth) catch unreachable;
+                if (value) |c| @memset(slice_, c);
+            } else if (size < s.i.items.len) {
+                s.i.shrinkAndFree(s.a, size);
+            }
+            s.set_internal_buffers();
+            return s;
+        }
+
+        pub fn shrink_to_fit(s: *Self) *Self {
+            s.i.shrinkToLen(s.a) catch unreachable;
+            s.set_internal_buffers();
+            return s;
+        }
+
+        pub fn span(s: *Self, index: usize, len: usize) ![]T {
             return s.slice(index, len);
         }
 
-        pub fn slice(s: *Self, index: usize, len: usize) string(T) {
-            if (index >= s.i.items.len) return string(T).init(s.a, empty_buffer);
-            const span_ = s.a.dupe(T, s.i.items[index..std.math.clamp(len, 0, s.i.items.len)]) catch unreachable;
-            defer s.a.free(span_);
-            const str_span = string(T).init(s.a, span_);
-            return str_span;
+        pub fn slice(s: *Self, index: usize, len: usize) ![]T {
+            if (index >= s.i.items.len) return StringErrors.ArgumentOutOfRange;
+            return s.a.dupe(T, s.i.items[index..std.math.clamp(len, 0, s.i.items.len)]) catch unreachable;
         }
 
-        inline fn set(s: *Self, value: []T) *Self {
+        pub fn swap(s: *Self, other: *Self) !void {
+            if (s.raw == null or other.raw == null) return StringErrors.NullArguement;
+
+            const temp = s.a.dupe(T, s.raw.?) catch unreachable;
+            defer s.a.free(temp);
+            _ = s.set(other.raw.?);
+            _ = other.set(temp);
+
+            s.set_internal_buffers();
+            other.set_internal_buffers();
+        }
+
+        inline fn set(s: *Self, value: []const T) *Self {
             s.i.clearRetainingCapacity();
             const copy_buffer = s.a.dupe(T, value) catch unreachable;
             defer s.a.free(copy_buffer);
@@ -408,6 +457,10 @@ pub fn string(T: type) type {
             return buffer.len;
         }
 
+        pub fn c_str(s: *Self, buffer: []T) usize {
+            return s.stru(buffer);
+        }
+
         //set contents of buffer with sentinel value and return buffer length, caller is responsible for freeing buffer
         pub fn strSentinelu(s: *Self, buffer: []T) usize {
             buffer = s.a.dupeSentinel(T, s.i.items, sentinel);
@@ -415,10 +468,16 @@ pub fn string(T: type) type {
         }
 
         inline fn set_internal_buffers(s: *Self) void {
-            if (s.raw) |previous| s.a.free(previous);
-            s.raw = s.a.dupe(T, s.i.items) catch unreachable;
-            if (s.rawSentinel) |previous| s.a.free(previous);
-            s.rawSentinel = s.a.dupeSentinel(T, s.i.items, sentinel) catch unreachable;
+            if (s.raw) |previous| {
+                s.a.free(previous);
+                s.raw = null;
+            }
+            s.raw = s.a.dupe(T, s.i.items[0..s.i.items.len]) catch unreachable;
+            if (s.rawSentinel) |previous| {
+                s.a.free(previous);
+                s.rawSentinel = null;
+            }
+            s.rawSentinel = s.a.dupeSentinel(T, s.i.items[0..s.i.items.len], sentinel) catch unreachable;
         }
     };
 }
@@ -1094,15 +1153,19 @@ test "span and slice" {
     var str_0 = string(u8).init(a, test_base);
     defer str_0.deinit();
 
-    var slice = str_0.slice(0, 4);
-    defer slice.deinit();
-    try std.testing.expectEqualStrings("A te", slice.str());
-    try std.testing.expectEqual(4, slice.length());
+    const slice = try str_0.slice(0, 4);
+    defer a.free(slice);
 
-    var span = str_0.span(0, 4);
-    defer span.deinit();
-    try std.testing.expectEqualStrings("A te", span.str());
-    try std.testing.expectEqual(4, span.length());
+    try std.testing.expectEqualStrings("A te", slice);
+    try std.testing.expectEqual(4, slice.len);
+
+    const span = try str_0.span(0, 4);
+    defer a.free(span);
+
+    try std.testing.expectEqualStrings("A te", span);
+    try std.testing.expectEqual(4, span.len);
+
+    try std.testing.expectError(StringErrors.ArgumentOutOfRange, str_0.slice(50, test_base.len));
 }
 
 test "from_writer" {}
@@ -1146,6 +1209,186 @@ test "from_arrayList" {
     try std.testing.expectEqual(test_base.len, str_1.length());
     try std.testing.expectEqual(0, str_1.compare(test_base));
     try std.testing.expectEqualStrings(test_base, str_1.str());
+}
+
+test "pop_back" {
+    const T = u8;
+
+    const a = std.testing.allocator;
+
+    const test_base = "A test string of great import.";
+
+    var str_0 = string(T).init(a, test_base);
+    defer str_0.deinit();
+    try std.testing.expectEqual(test_base.len, str_0.length());
+
+    const last_char = str_0.pop_back();
+
+    try std.testing.expect(last_char != null);
+    try std.testing.expectEqual('.', last_char.?);
+    try std.testing.expectEqualStrings("A test string of great import", str_0.str());
+
+    var str_1 = string(T).init(a, empty_buffer);
+    defer str_1.deinit();
+
+    try std.testing.expectEqual(0, str_1.length());
+
+    const empty_string_back_popped = str_1.pop_back();
+
+    try std.testing.expectEqual(null, empty_string_back_popped);
+}
+
+test "push_back" {
+    const T = u8;
+
+    const a = std.testing.allocator;
+
+    const test_base = "A test string of great import.";
+
+    var str_0 = string(T).init(a, test_base);
+    defer str_0.deinit();
+    try std.testing.expectEqual(test_base.len, str_0.length());
+
+    _ = str_0.push_back('a');
+
+    try std.testing.expect((try str_0.back()) != null);
+    try std.testing.expectEqual('a', (try str_0.back()).?);
+    try std.testing.expectEqualStrings(test_base ++ "a", str_0.str());
+
+    _ = str_0.push_back('\n');
+    try std.testing.expect((try str_0.back()) != null);
+    try std.testing.expectEqual('\n', (try str_0.back()).?);
+    try std.testing.expectEqualStrings(test_base ++ "a\n", str_0.str());
+
+    var str_empty = string(T).init(a, empty_buffer);
+    defer str_empty.deinit();
+
+    _ = str_empty.push_back('b');
+    try std.testing.expectEqualStrings("b", str_empty.str());
+}
+
+test "reserve" {
+    const T = u8;
+
+    const a = std.testing.allocator;
+
+    const test_base = "A test string of great import.";
+
+    var str_0 = string(T).init(a, test_base);
+    defer str_0.deinit();
+
+    var capacity_before = str_0.capacity();
+
+    _ = str_0.reserve(capacity_before + 1);
+
+    try std.testing.expect(capacity_before + 1 <= str_0.capacity());
+
+    capacity_before = str_0.capacity();
+
+    _ = str_0.reserve(capacity_before - 1);
+
+    //capacity only grows with reserve call
+    try std.testing.expect(capacity_before - 1 <= str_0.capacity());
+}
+
+test "shrink_to_fit" {
+    const T = u8;
+
+    const a = std.testing.allocator;
+
+    const test_base = "A test string of great import.";
+    const test_base_shorter = "A test.";
+
+    var str_0 = string(T).init(a, test_base);
+    defer str_0.deinit();
+
+    var capacity_before = str_0.capacity();
+
+    _ = str_0.shrink_to_fit();
+
+    try std.testing.expectEqual(str_0.length(), str_0.length());
+    try std.testing.expectEqual(test_base.len, str_0.capacity());
+
+    _ = str_0.set(test_base_shorter);
+
+    try std.testing.expectEqual(test_base.len, str_0.capacity());
+
+    capacity_before = str_0.capacity();
+
+    _ = str_0.shrink_to_fit();
+
+    try std.testing.expect(capacity_before > str_0.capacity());
+
+    try std.testing.expectEqual(test_base_shorter.len, str_0.length());
+    try std.testing.expectEqual(test_base_shorter.len, str_0.capacity());
+}
+
+test "swap" {
+    const T = u8;
+
+    const a = std.testing.allocator;
+
+    const test_base = "A test string of great import.";
+    const test_base_other = "A test string that is completely different.";
+
+    var str_0 = string(T).init(a, test_base);
+    defer str_0.deinit();
+
+    var str_1 = string(T).init(a, test_base_other);
+    defer str_1.deinit();
+
+    var str_empty = string(T).init(a, empty_buffer);
+    defer str_empty.deinit();
+
+    try std.testing.expectEqual(test_base.len, str_0.length());
+    try std.testing.expectEqualStrings(test_base, str_0.str());
+
+    try std.testing.expectEqual(test_base_other.len, str_1.length());
+    try std.testing.expectEqualStrings(test_base_other, str_1.str());
+
+    try str_0.swap(@constCast(&str_1));
+
+    try std.testing.expectEqual(test_base_other.len, str_0.length());
+    try std.testing.expectEqualStrings(test_base_other, str_0.str());
+
+    try std.testing.expectEqual(test_base.len, str_1.length());
+    try std.testing.expectEqualStrings(test_base, str_1.str());
+
+    try str_0.swap(@constCast(&str_empty));
+
+    try std.testing.expectEqual(empty_buffer.len, str_0.length());
+    try std.testing.expectEqualStrings(empty_buffer, str_0.str());
+
+    try std.testing.expectEqual(test_base_other.len, str_empty.length());
+    try std.testing.expectEqualStrings(test_base_other, str_empty.str());
+
+    var str_null_0 = string(T).init(a, null);
+    defer str_null_0.deinit();
+    var str_null_1 = string(T).init(a, null);
+    defer str_null_1.deinit();
+
+    //empty strings are the default
+    try str_null_0.swap(@constCast(&str_null_1));
+}
+
+test "deinit" {
+    const T = u8;
+
+    const a = std.testing.allocator;
+
+    const test_base = "A test string of great import.";
+    var str_0 = string(T).init(a, test_base);
+
+    str_0.deinit();
+
+    try std.testing.expect(str_0._disposed);
+    try std.testing.expect(str_0.raw == null);
+    try std.testing.expect(str_0.rawSentinel == null);
+
+    //deinit has a flag to protect subsequent deinit calls
+    str_0.deinit();
+
+    try std.testing.expect(true);
 }
 
 //TODO: use string(T) as parameters instead of []const T
