@@ -435,9 +435,7 @@ pub fn string(T: type) type {
 
         inline fn set(s: *Self, value: []const T) *Self {
             s.i.clearRetainingCapacity();
-            const copy_buffer = s.a.dupe(T, value) catch unreachable;
-            defer s.a.free(copy_buffer);
-            s.i.appendSlice(s.a, copy_buffer) catch unreachable;
+            s.i.appendSlice(s.a, value) catch unreachable;
             s.set_internal_buffers();
             return s;
         }
@@ -1462,4 +1460,31 @@ test "deinit" {
     try std.testing.expect(true);
 }
 
+test "set" {
+    const T = u8;
+
+    const a = std.testing.allocator;
+
+    //confirm our string buffer is not freed by the passed in parameter being freed
+    const test_base = try a.dupe(T, "A test string of great import.");
+
+    var str_0 = string(T).init(a, test_base);
+    defer str_0.deinit();
+
+    a.free(test_base);
+
+    const buffer = str_0.str();
+
+    try std.testing.expectEqualStrings("A test string of great import.", buffer);
+
+    //confirm our buffer isn't freed by the string deinit
+    const test_base_1 = try a.dupe(T, "A test string of great import.");
+    defer a.free(test_base_1);
+
+    var str_1 = string(T).init(a, test_base);
+
+    str_1.deinit();
+
+    try std.testing.expectEqualStrings("A test string of great import.", test_base_1);
+}
 //TODO: use string(T) as parameters instead of []const T
