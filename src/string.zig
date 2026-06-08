@@ -152,20 +152,13 @@ pub fn string(T: type) type {
             return s.set(trimmed).str();
         }
 
-        pub fn substr(s: *Self, index: usize, count: usize) ![]T {
-            if (count > s.i.items.len) return StringErrors.ArgumentOutOfRange;
+        pub fn substr(s: *Self, index: usize, count: i64) ![]T {
+            if (index > s.i.items.len) return StringErrors.ArgumentOutOfRange;
 
-            var i: usize = index;
-            var subList: std.ArrayList(T) = .empty;
-            while (i < s.i.items.len and i < count) : (i += 1) {
-                try subList.append(s.a, s.i.items[i]);
-            }
-
-            const subString = try subList.toOwnedSlice(s.a);
-            defer s.a.free(subString);
-
-            //s.set sets internal buffers
-            return s.set(subString).str();
+            const char_count: usize = if (count == npos) s.i.items.len else @intCast(count);
+            const start: usize = index;
+            const end: usize = std.math.clamp(index + char_count, index, s.i.items.len);
+            return try s.a.dupe(T, s.i.items[start..end]);
         }
 
         pub fn length(s: *Self) usize {
@@ -554,20 +547,31 @@ test "trim" {
 }
 
 test "substr(index, length)" {
-    var str_0 = string(u8).init(std.testing.allocator, "01234567");
+    const a = std.testing.allocator;
+
+    const T = u8;
+
+    var str_0 = string(T).init(a, "01234567");
     defer str_0.deinit();
     const sub = try str_0.substr(0, 5);
+    defer a.free(sub);
     try std.testing.expectEqualStrings("01234", sub);
 
-    var str_1 = string(u8).init(std.testing.allocator, "01234567");
+    var str_1 = string(T).init(a, "01234567");
     defer str_1.deinit();
     const sub_short = try str_1.substr(0, 8);
+    defer a.free(sub_short);
     try std.testing.expectEqualStrings("01234567", sub_short);
 
-    var str_2 = string(u8).init(std.testing.allocator, "01234567");
+    var str_2 = string(T).init(a, "01234567");
     defer str_2.deinit();
-    const sub_beyond = try str_2.substr(55, 8);
-    try std.testing.expectEqualStrings(empty_buffer, sub_beyond);
+    try std.testing.expectError(StringErrors.ArgumentOutOfRange, str_2.substr(55, string(T).npos));
+
+    var str_3 = string(T).init(a, "0123456789");
+    defer str_3.deinit();
+    const sub_beyond = try str_3.substr(0, 99);
+    defer a.free(sub_beyond);
+    try std.testing.expectEqualStrings("0123456789", sub_beyond);
 }
 
 test "length" {
