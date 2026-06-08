@@ -248,24 +248,24 @@ pub fn string(T: type) type {
             return s;
         }
 
-        pub fn erase(s: *Self, index: usize, count: usize) *Self {
-            const start = std.math.clamp(index, 0, s.i.items.len - 1);
-            const end = @min(start + count, s.i.items.len - 1);
+        pub fn erase(s: *Self, pos: usize, len: usize) *Self {
+            //could throw errors if pos is beyond string length, but won't.
+            if (pos > s.i.items.len) return s;
 
-            var after: std.ArrayList(T) = .empty;
-            defer after.deinit(s.a);
+            const erasure_len = if (len == npos) s.i.items.len else len;
+            const erasure_start = std.math.clamp(pos, 0, s.i.items.len - 1);
+            const erasure_end = @min(erasure_start + erasure_len, s.i.items.len);
 
-            for (s.i.items, 0..) |item, i| {
-                if (i < start or i >= end) {
-                    after.append(s.a, item) catch unreachable;
-                }
-            }
+            var remainder: std.ArrayList(T) = .empty;
+            defer remainder.deinit(s.a);
 
-            s.i.deinit(s.a);
-            s.i = cloneList(s.a, T, after) catch unreachable;
+            remainder.appendSlice(s.a, s.i.items[0..erasure_start]) catch unreachable;
+            remainder.appendSlice(s.a, s.i.items[erasure_end..s.i.items.len]) catch unreachable;
 
-            s.set_internal_buffers();
-            return s;
+            const remaining = remainder.toOwnedSlice(s.a) catch unreachable;
+            defer s.a.free(remaining);
+
+            return s.set(remaining);
         }
 
         pub fn replace(s: *Self, pos: usize, len: i64, buffer: []const T) !*Self {
