@@ -308,7 +308,7 @@ pub fn string(T: type) type {
             if (index >= s.i.items.len) return -1;
 
             const focus = s.i.items[index..];
-            const needle_ = needle[0..n];
+            const needle_ = needle[0..std.math.clamp(n, 0, needle.len)];
 
             for (focus, 0..) |c, i| {
                 if (std.mem.containsAtLeastScalar2(T, needle_, c, 1)) {
@@ -320,13 +320,14 @@ pub fn string(T: type) type {
 
         pub fn find_last_of(s: *Self, needle: []const T, index: usize, n: usize) !i64 {
             const haystack_ = s.i.items[0..std.math.clamp(index, 0, s.i.items.len)];
-            const needle_ = needle[0..n];
+            const needle_ = needle[0..std.math.clamp(n, 0, needle.len)];
 
             var idx: usize = haystack_.len - 1;
-            while (idx > 0) : (idx -= 1) {
+            while (idx >= 0) : (idx -= 1) {
                 if (std.mem.containsAtLeastScalar2(T, needle_, haystack_[idx], 1)) {
                     return @as(i64, @intCast(idx));
                 }
+                if (idx <= 0) return -1;
             }
 
             return -1;
@@ -335,7 +336,7 @@ pub fn string(T: type) type {
             if (index >= s.i.items.len) return -1;
 
             const haystack_ = s.i.items[index..];
-            const notlist_ = notlist[0..n];
+            const notlist_ = notlist[0..std.math.clamp(n, 0, notlist.len)];
 
             for (haystack_, 0..) |needle, i| {
                 if (!std.mem.containsAtLeastScalar2(T, notlist_, needle, 1)) {
@@ -356,10 +357,11 @@ pub fn string(T: type) type {
             const needle_ = needle[0..slen];
 
             var idx: usize = haystack_.len - 1;
-            while (idx > 0) : (idx -= 1) {
+            while (idx >= 0) : (idx -= 1) {
                 if (!std.mem.containsAtLeastScalar2(T, needle_, haystack_[idx], 1)) {
                     return @as(i64, @intCast(idx));
                 }
+                if (idx == 0) return -1;
             }
 
             return -1;
@@ -1113,6 +1115,12 @@ test "find_last_of" {
     const match_case = try str_match_case.find_last_of("a", test_base.len, 1);
 
     try std.testing.expectEqual(20, match_case);
+
+    var str_match_first_element = string(u8).init(a, test_base);
+    defer str_match_first_element.deinit();
+    const match_first = try str_match_first.find_last_of("A", test_base.len, 1);
+
+    try std.testing.expectEqual(0, match_first);
 }
 
 test "find_first_not_of" {
@@ -1188,6 +1196,8 @@ test "find_first_not_of" {
 test "find_last_not_of" {
     const a = std.testing.allocator;
 
+    const T = u8;
+
     const test_base = "A test string of great import.     \r\n ";
 
     var str_match_last = string(u8).init(a, test_base);
@@ -1217,7 +1227,7 @@ test "find_last_not_of" {
 
     var str_match_none_beyond = string(u8).init(a, test_base);
     defer str_match_none_beyond.deinit();
-    const match_none_beyond = try str_match_none_beyond.find_last_not_of("t", 1, 1);
+    const match_none_beyond = try str_match_none_beyond.find_last_not_of("A", 1, 1);
 
     try std.testing.expectEqual(-1, match_none_beyond);
 
@@ -1228,6 +1238,15 @@ test "find_last_not_of" {
     const match_case = try str_match_case.find_last_not_of(test_base_uppercase, test_base.len, test_base_uppercase.len);
 
     try std.testing.expectEqual(28, match_case);
+
+    var str_empty = string(u8).init(a, "");
+    defer str_empty.deinit();
+
+    var str_blank = string(u8).init(a, " ");
+    defer str_blank.deinit();
+    const match_empty = try str_blank.find_last_not_of(empty_buffer, string(T).npos, empty_buffer.len);
+
+    try std.testing.expectEqual(0, match_empty);
 }
 
 test "compare" {
