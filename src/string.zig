@@ -237,7 +237,7 @@ pub fn string(T: type) type {
             if (pos > s.i.items.len) return s;
 
             const erasure_len = if (len == npos) s.i.items.len else len;
-            const erasure_start = std.math.clamp(pos, 0, s.i.items.len - 1);
+            const erasure_start = std.math.clamp(pos, 0, s.i.items.len);
             const erasure_end = @min(erasure_start + erasure_len, s.i.items.len);
 
             var remainder: std.ArrayList(T) = .empty;
@@ -751,26 +751,63 @@ test "insert" {
 }
 
 test "erase" {
-    var str_0 = string(u8).init(std.testing.allocator, "content for your pleasure");
+    const T = u8;
+
+    var str_0 = string(T).init(std.testing.allocator, "content for your pleasure");
     defer str_0.deinit();
 
     _ = str_0.erase(0, 8);
 
     try std.testing.expectEqualStrings("for your pleasure", str_0.str());
 
-    var str_1 = string(u8).init(std.testing.allocator, "content for your pleasure");
+    var str_1 = string(T).init(std.testing.allocator, "content for your pleasure");
     defer str_1.deinit();
 
     _ = str_1.erase(50, 10);
 
     try std.testing.expectEqualStrings("content for your pleasure", str_1.str());
 
-    var str_2 = string(u8).init(std.testing.allocator, "content for your pleasure");
+    var str_2 = string(T).init(std.testing.allocator, "content for your pleasure");
     defer str_2.deinit();
 
     _ = str_2.erase(5, 4);
 
     try std.testing.expectEqualStrings("conteor your pleasure", str_2.str());
+
+    var str_3 = string(T).init(std.testing.allocator, "content for your pleasure");
+    defer str_3.deinit();
+
+    _ = str_3.erase(str_3.length() - 1, 1);
+
+    try std.testing.expectEqualStrings("content for your pleasur", str_3.str());
+
+    var str_4 = string(T).init(std.testing.allocator, "x x");
+    defer str_4.deinit();
+
+    _ = str_4.erase(1, 1);
+
+    try std.testing.expectEqualStrings("xx", str_4.str());
+
+    var str_5 = string(T).init(std.testing.allocator, "x x");
+    defer str_5.deinit();
+
+    _ = str_5.erase(0, 1);
+
+    try std.testing.expectEqualStrings(" x", str_5.str());
+
+    var str_6 = string(T).init(std.testing.allocator, "x x");
+    defer str_6.deinit();
+
+    _ = str_6.erase(2, 1);
+
+    try std.testing.expectEqualStrings("x ", str_6.str());
+
+    var str_7 = string(T).init(std.testing.allocator, "x x");
+    defer str_7.deinit();
+
+    _ = str_7.erase(str_7.length() - 1, 1);
+
+    try std.testing.expectEqualStrings("x ", str_7.str());
 }
 
 test "replace" {
