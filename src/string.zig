@@ -322,12 +322,12 @@ pub fn string(T: type) type {
             const haystack_ = s.i.items[0..std.math.clamp(index, 0, s.i.items.len)];
             const needle_ = needle[0..std.math.clamp(n, 0, needle.len)];
 
-            var idx: usize = haystack_.len - 1;
-            while (idx >= 0) : (idx -= 1) {
+            var idx: usize = haystack_.len;
+            while (idx > 0) {
+                idx -= 1;
                 if (std.mem.containsAtLeastScalar2(T, needle_, haystack_[idx], 1)) {
                     return @as(i64, @intCast(idx));
                 }
-                if (idx <= 0) return -1;
             }
 
             return -1;
@@ -356,12 +356,12 @@ pub fn string(T: type) type {
             const haystack_ = s.i.items[0..std.math.clamp(end, 0, s.i.items.len)];
             const needle_ = needle[0..slen];
 
-            var idx: usize = haystack_.len - 1;
-            while (idx >= 0) : (idx -= 1) {
+            var idx: usize = haystack_.len;
+            while (idx > 0) {
+                idx -= 1;
                 if (!std.mem.containsAtLeastScalar2(T, needle_, haystack_[idx], 1)) {
                     return @as(i64, @intCast(idx));
                 }
-                if (idx == 0) return -1;
             }
 
             return -1;
@@ -440,17 +440,17 @@ pub fn string(T: type) type {
         }
 
         //set contents of buffer and return buffer length, caller is responsible for freeing buffer
-        pub fn stru(s: *Self, buffer: []T) usize {
-            buffer = s.a.dupe(T, s.i.items);
+        pub fn stru(s: *Self, a: std.mem.Allocator, buffer: *[]T) !usize {
+            buffer.* = try a.dupe(T, s.i.items);
             return buffer.len;
         }
 
-        pub fn c_str(s: *Self, buffer: []T) usize {
-            return s.stru(buffer);
+        pub fn c_str(s: *Self, a: std.mem.Allocator, buffer: *[]T) !usize {
+            return try s.stru(a, buffer);
         }
 
-        pub fn strSentinelu(s: *Self, buffer: []T) usize {
-            buffer = s.a.dupeSentinel(T, s.i.items, sentinel);
+        pub fn strSentinelu(s: *Self, a: std.mem.Allocator, buffer: *[:sentinel]T) !usize {
+            buffer.* = try a.dupeSentinel(T, s.i.items, sentinel);
             return buffer.len;
         }
 
@@ -1121,6 +1121,12 @@ test "find_last_of" {
     const match_first = try str_match_first.find_last_of("A", test_base.len, 1);
 
     try std.testing.expectEqual(0, match_first);
+
+    var str_match_last_element = string(u8).init(a, test_base);
+    defer str_match_last_element.deinit();
+    const match_last = try str_match_last_element.find_last_of(".", @intCast(test_base.len), 1);
+
+    try std.testing.expectEqual(@as(i64, @intCast(test_base.len - 1)), match_last);
 }
 
 test "find_first_not_of" {
@@ -1682,6 +1688,119 @@ test "deinit" {
     str_0.deinit();
 
     try std.testing.expect(true);
+}
+
+test "str" {
+    const T = u8;
+
+    const a = std.testing.allocator;
+
+    const test_base = "A test string of great import.";
+
+    //str, strsentinel, c_str, stru, strSentinelu
+    var str_0 = string(T).init(a, test_base);
+    defer str_0.deinit();
+
+    try std.testing.expectEqualStrings(test_base, str_0.str());
+    try std.testing.expectEqual(test_base.len, str_0.str().len);
+    try std.testing.expectEqualStrings(test_base, str_0.strSentinel());
+    try std.testing.expectEqual(test_base.len, str_0.strSentinel().len);
+
+    var str_0_cstr: []T = undefined;
+    _ = &str_0_cstr;
+    defer a.free(str_0_cstr);
+    const str_0_cstr_len = str_0.c_str(a, &str_0_cstr);
+
+    try std.testing.expectEqual(test_base.len, str_0_cstr_len);
+    try std.testing.expectEqualStrings(test_base, str_0_cstr);
+
+    var str_0_stru: []T = undefined;
+    _ = &str_0_stru;
+    defer a.free(str_0_stru);
+    const str_0_stru_len = str_0.stru(a, &str_0_stru);
+
+    try std.testing.expectEqual(test_base.len, str_0_stru_len);
+    try std.testing.expectEqualStrings(test_base, str_0_stru);
+
+    var str_0_strSentinelu: []T = undefined;
+    _ = &str_0_strSentinelu;
+    defer a.free(str_0_strSentinelu);
+    const str_0_sentinel_len = str_0.stru(a, &str_0_strSentinelu);
+
+    try std.testing.expectEqual(test_base.len, str_0_sentinel_len);
+    try std.testing.expectEqualStrings(test_base, str_0_strSentinelu);
+
+    var str_1 = string(T).init(a, empty_buffer);
+    defer str_1.deinit();
+
+    try std.testing.expectEqualStrings(empty_buffer, str_1.str());
+    try std.testing.expectEqual(empty_buffer.len, str_1.str().len);
+    try std.testing.expectEqualStrings(empty_buffer, str_1.strSentinel());
+    try std.testing.expectEqual(empty_buffer.len, str_1.strSentinel().len);
+
+    var str_1_cstr: []T = undefined;
+    _ = &str_1_cstr;
+    defer a.free(str_1_cstr);
+    const str_1_cstr_len = str_1.c_str(a, &str_1_cstr);
+
+    try std.testing.expectEqual(empty_buffer.len, str_1_cstr_len);
+    try std.testing.expectEqualStrings(empty_buffer, str_1_cstr);
+
+    var str_1_stru: []T = undefined;
+    _ = &str_1_stru;
+    defer a.free(str_1_stru);
+    const str_1_stru_len = str_1.stru(a, &str_1_stru);
+
+    try std.testing.expectEqual(empty_buffer.len, str_1_stru_len);
+    try std.testing.expectEqualStrings(empty_buffer, str_1_stru);
+
+    var str_1_strSentinelu: [:string(T).sentinel]T = undefined;
+    _ = &str_1_strSentinelu;
+    defer a.free(str_1_strSentinelu);
+    const str_1_sentinel_len = str_1.strSentinelu(a, &str_1_strSentinelu);
+
+    try std.testing.expectEqual(empty_buffer.len, str_1_sentinel_len);
+    try std.testing.expectEqualStrings(empty_buffer, str_1_strSentinelu);
+
+    const test_length_big = 1024 * 10 * 1024;
+    var test_string_big = try a.alloc(T, test_length_big);
+    _ = &test_string_big;
+    defer a.free(test_string_big);
+    @memset(test_string_big, 'A');
+
+    var str_2_big = string(T).init(a, test_string_big);
+    defer str_2_big.deinit();
+
+    try std.testing.expectEqualStrings(test_string_big, str_2_big.str());
+    try std.testing.expectEqual(test_string_big.len, str_2_big.str().len);
+    try std.testing.expectEqualStrings(test_string_big, str_2_big.strSentinel());
+    try std.testing.expectEqual(test_string_big.len, str_2_big.strSentinel().len);
+
+    var str_2_big_cstr: []T = undefined;
+    defer a.free(str_2_big_cstr);
+    const str_2_big_cstr_len = str_2_big.c_str(a, &str_2_big_cstr);
+
+    try std.testing.expectEqual(test_string_big.len, str_2_big_cstr_len);
+    try std.testing.expectEqualStrings(test_string_big, str_2_big_cstr);
+
+    var str_2_big_stru: []T = undefined;
+    defer a.free(str_2_big_stru);
+    const str_2_big_stru_len = str_2_big.stru(a, &str_2_big_stru);
+
+    try std.testing.expectEqual(test_string_big.len, str_2_big_stru_len);
+    try std.testing.expectEqualStrings(test_string_big, str_2_big_stru);
+
+    var test_string_big_z: [:string(T).sentinel]T = try a.allocSentinel(T, test_length_big, string(T).sentinel);
+    _ = &test_string_big_z;
+    defer a.free(test_string_big_z);
+    @memset(test_string_big_z, 'A');
+
+    var str_2_big_strSentinelu: [:string(T).sentinel]T = undefined;
+    defer a.free(str_2_big_strSentinelu);
+    const str_2_big_sentinel_len = str_2_big.strSentinelu(a, &str_2_big_strSentinelu);
+
+    try std.testing.expectEqual(test_string_big_z.len, str_2_big_sentinel_len);
+    try std.testing.expectEqualStrings(test_string_big_z, str_2_big_strSentinelu);
 }
 
 test "set" {
