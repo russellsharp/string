@@ -1303,6 +1303,14 @@ test "contains" {
     try std.testing.expect(!try str_0.contains("\t"));
     try std.testing.expect(try str_0.contains(" "));
     try std.testing.expect(try str_0.contains("great"));
+
+    const test_base_1 = "";
+
+    var str_1 = string(u8).init(a, test_base_1);
+    defer str_1.deinit();
+
+    try std.testing.expect(try str_1.ends_with(""));
+    try std.testing.expect(!(try str_1.ends_with(" ")));
 }
 
 test "span and slice" {
