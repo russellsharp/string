@@ -77,6 +77,20 @@ pub fn string(T: type) type {
             return s.i.items[s.i.items.len - 1];
         }
 
+        pub fn starts_with(s: *Self, buffer: []const T) !bool {
+            if (buffer.len > s.length()) return false;
+
+            return (try s.find(buffer, 0, @intCast(buffer.len))) == 0;
+        }
+
+        pub fn ends_with(s: *Self, buffer: []const T) bool {
+            if (buffer.len > s.length()) return false;
+
+            std.debug.print("found: {d}, looking: {d}\n", .{ s.rfind(buffer, s.length()), s.length() - buffer.len });
+
+            return s.rfind(buffer, s.length() - 1) == (s.length - buffer.len);
+        }
+
         pub fn trimRight(s: *Self, charactersToTrim: []const T) ![]T {
             if (charactersToTrim.len < 1) return StringErrors.InvalidArgument;
             if (s.i.items.len < 1) return StringErrors.EmptyString;
@@ -197,7 +211,7 @@ pub fn string(T: type) type {
         }
 
         pub fn at(s: *Self, pos: usize) !T {
-            if (pos > s.i.items.len - 1) return StringErrors.InvalidArgument;
+            if (pos >= s.i.items.len) return StringErrors.InvalidArgument;
             return s.i.items[pos];
         }
 
@@ -260,10 +274,11 @@ pub fn string(T: type) type {
             return s;
         }
 
-        pub fn find(s: *Self, needle: []const T, index: usize, needle_len: usize) !i64 {
+        pub fn find(s: *Self, needle: []const T, index: usize, len: i64) !i64 {
             if (index >= s.i.items.len) return StringErrors.InvalidArgument;
-            if (needle_len > needle.len) return StringErrors.InvalidArgument;
+            if (len > needle.len) return StringErrors.InvalidArgument;
 
+            const needle_len = if (len == npos) needle.len else @as(usize, @intCast(len));
             const needle_ = needle[0..needle_len];
             const haystack_ = s.i.items[index..];
 
@@ -397,9 +412,6 @@ pub fn string(T: type) type {
             defer s.a.free(temp);
             _ = s.set(other.raw.?);
             _ = other.set(temp);
-
-            s.set_internal_buffers();
-            other.set_internal_buffers();
         }
 
         inline fn set(s: *Self, value: []const T) *Self {
@@ -409,7 +421,6 @@ pub fn string(T: type) type {
             return s;
         }
 
-        //caller gets a newly allocated []const T that they must free
         pub fn str(s: *Self) []T {
             s.set_internal_buffers();
             return s.raw.?;
@@ -430,7 +441,6 @@ pub fn string(T: type) type {
             return s.stru(buffer);
         }
 
-        //set contents of buffer with sentinel value and return buffer length, caller is responsible for freeing buffer
         pub fn strSentinelu(s: *Self, buffer: []T) usize {
             buffer = s.a.dupeSentinel(T, s.i.items, sentinel);
             return buffer.len;
@@ -1219,6 +1229,29 @@ test "comparen" {
     defer str_cpp_shorter.deinit();
 
     try std.testing.expectEqual(-1, str_cpp_shorter.comparen(0, str_cpp_shorter.length(), "applepie", 8));
+}
+
+test "starts_with" {
+    const a = std.testing.allocator;
+
+    const test_base = "A test string of great import. ";
+
+    var str_0 = string(u8).init(a, test_base);
+    defer str_0.deinit();
+
+    try std.testing.expect(try str_0.starts_with("A test"));
+
+    try std.testing.expect(try str_0.starts_with(""));
+
+    try std.testing.expect(!(try str_0.starts_with(" ")));
+
+    try std.testing.expect(!(try str_0.starts_with("A test bear.")));
+
+    try std.testing.expect((try str_0.starts_with("A")));
+
+    try std.testing.expect(!(try str_0.starts_with("test")));
+
+    try std.testing.expect(!(try str_0.starts_with("import.")));
 }
 
 test "span and slice" {
