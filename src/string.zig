@@ -83,12 +83,16 @@ pub fn string(T: type) type {
             return (try s.find(buffer, 0, @intCast(buffer.len))) == 0;
         }
 
-        pub fn ends_with(s: *Self, buffer: []const T) bool {
+        pub fn ends_with(s: *Self, buffer: []const T) !bool {
             if (buffer.len > s.length()) return false;
 
-            std.debug.print("found: {d}, looking: {d}\n", .{ s.rfind(buffer, s.length()), s.length() - buffer.len });
+            const relevant = s.i.items[s.i.items.len - buffer.len .. s.i.items.len];
 
-            return s.rfind(buffer, s.length() - 1) == (s.length - buffer.len);
+            return std.mem.eql(T, relevant, buffer);
+        }
+
+        pub fn contains(s: *Self, buffer: []const T) !bool {
+            return try s.find(buffer, 0, @intCast(buffer.len)) != npos;
         }
 
         pub fn trimRight(s: *Self, charactersToTrim: []const T) ![]T {
@@ -286,7 +290,7 @@ pub fn string(T: type) type {
 
             const found = std.mem.find(T, haystack_, needle_);
 
-            return if (found != null) @intCast(found.?) else @as(i64, -1);
+            return if (found != null) @intCast(found.?) else @as(i64, npos);
         }
 
         pub fn rfind(s: *Self, needle: []const T, index: usize) !i64 {
@@ -322,7 +326,6 @@ pub fn string(T: type) type {
 
             return -1;
         }
-
         pub fn find_first_not_of(s: *Self, notlist: []const T, index: usize, n: usize) !i64 {
             if (index >= s.i.items.len) return -1;
 
@@ -1252,6 +1255,54 @@ test "starts_with" {
     try std.testing.expect(!(try str_0.starts_with("test")));
 
     try std.testing.expect(!(try str_0.starts_with("import.")));
+}
+
+test "ends_with" {
+    const a = std.testing.allocator;
+
+    const test_base = "A test string of great import.";
+
+    var str_0 = string(u8).init(a, test_base);
+    defer str_0.deinit();
+
+    try std.testing.expect(try str_0.ends_with("import."));
+
+    try std.testing.expect(try str_0.ends_with(""));
+
+    try std.testing.expect(!(try str_0.ends_with(" ")));
+
+    try std.testing.expect(!(try str_0.ends_with("important bear.")));
+
+    try std.testing.expect(!(try str_0.ends_with("t")));
+
+    try std.testing.expect(!(try str_0.ends_with("ort")));
+
+    try std.testing.expect(!(try str_0.ends_with("import")));
+    const test_base_1 = "";
+
+    var str_1 = string(u8).init(a, test_base_1);
+    defer str_1.deinit();
+
+    try std.testing.expect(try str_1.ends_with(""));
+    try std.testing.expect(!(try str_1.ends_with(" ")));
+}
+
+test "contains" {
+    const a = std.testing.allocator;
+
+    const test_base = "A test string of great import.";
+
+    var str_0 = string(u8).init(a, test_base);
+    defer str_0.deinit();
+
+    try std.testing.expect(try str_0.contains("import."));
+    try std.testing.expect(try str_0.contains(""));
+    try std.testing.expect(!try str_0.contains("x"));
+    try std.testing.expect(!try str_0.contains("important"));
+    try std.testing.expect(!try str_0.contains("import.ant"));
+    try std.testing.expect(!try str_0.contains("\t"));
+    try std.testing.expect(try str_0.contains(" "));
+    try std.testing.expect(try str_0.contains("great"));
 }
 
 test "span and slice" {
