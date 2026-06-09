@@ -80,40 +80,22 @@ pub fn string(T: type) type {
         pub fn trimRight(s: *Self, charactersToTrim: []const T) ![]T {
             if (charactersToTrim.len < 1) return StringErrors.InvalidArgument;
             if (s.i.items.len < 1) return StringErrors.EmptyString;
-            var idx = s.i.items.len - 1;
-            var last: usize = s.i.items.len;
 
-            while (idx > 0) : (idx -= 1) {
-                if (std.mem.containsAtLeastScalar2(T, charactersToTrim, s.i.items[idx], 1)) {
-                    s.i.items[idx] = 0;
-                    if (idx < last) last = idx;
-                    continue;
-                }
-                break;
-            }
+            const last: usize = @intCast(try s.find_last_not_of(charactersToTrim, @intCast(s.length()), npos));
 
-            s.i.shrinkAndFree(s.a, last);
+            const trimmed = try s.a.dupe(T, s.i.items[0 .. last + 1]);
+            defer s.a.free(trimmed);
 
-            s.set_internal_buffers();
-            return s.str();
+            return s.set(trimmed).str();
         }
 
         pub fn trimLeft(s: *Self, charactersToTrim: []const T) ![]T {
             if (charactersToTrim.len < 1) return StringErrors.InvalidArgument;
             if (s.i.items.len < 1) return StringErrors.EmptyString;
 
-            var idx: usize = 0;
-            var first: usize = 0;
-            while (idx < s.i.items.len) : (idx += 1) {
-                if (std.mem.containsAtLeastScalar2(T, charactersToTrim, s.i.items[idx], 1)) {
-                    s.i.items[idx] = 0;
-                    first = idx + 1;
-                    continue;
-                }
-                break;
-            }
+            const first: usize = @intCast(try s.find_first_not_of(charactersToTrim, 0, charactersToTrim.len));
 
-            const trimmed = try s.a.dupe(T, s.i.items[first .. s.i.items.len - 1]);
+            const trimmed = try s.a.dupe(T, s.i.items[first..s.i.items.len]);
             defer s.a.free(trimmed);
 
             return s.set(trimmed).str();
@@ -123,27 +105,8 @@ pub fn string(T: type) type {
             if (charactersToTrim.len < 1) return StringErrors.InvalidArgument;
             if (s.i.items.len < 1) return StringErrors.EmptyString;
 
-            var idx = s.i.items.len - 1;
-            var first: usize = idx;
-            var last: usize = idx;
-
-            while (idx > 0) : (idx -= 1) {
-                if (std.mem.containsAtLeastScalar2(T, charactersToTrim, s.i.items[idx], 1)) {
-                    s.i.items[idx] = 0;
-                    last = idx;
-                    continue;
-                }
-                break;
-            }
-            idx = 0;
-            while (idx < s.i.items.len) : (idx += 1) {
-                if (std.mem.containsAtLeastScalar2(T, charactersToTrim, s.i.items[idx], 1)) {
-                    s.i.items[idx] = 0;
-                    first = idx + 1;
-                    continue;
-                }
-                break;
-            }
+            const first: usize = @intCast(try s.find_first_not_of(charactersToTrim, 0, charactersToTrim.len));
+            const last: usize = @intCast(try s.find_last_not_of(charactersToTrim, @intCast(s.length()), @as(i64, @intCast(charactersToTrim.len))) + 1);
 
             const trimmed = try s.a.dupe(T, s.i.items[first..last]);
             defer s.a.free(trimmed);
@@ -359,9 +322,15 @@ pub fn string(T: type) type {
             return -1;
         }
 
-        pub fn find_last_not_of(s: *Self, needle: []const T, index: usize, n: usize) !i64 {
-            const haystack_ = s.i.items[0..std.math.clamp(index, 0, s.i.items.len)];
-            const needle_ = needle[0..n];
+        pub fn find_last_not_of(s: *Self, needle: []const T, pos: i64, n: i64) !i64 {
+            if (pos > s.length()) return StringErrors.ArgumentOutOfRange;
+            if (n > needle.len) return StringErrors.ArgumentOutOfRange;
+
+            const slen: usize = if (n == npos) needle.len else @as(usize, @intCast(n));
+
+            const end: usize = if (pos == npos) s.i.items.len else @as(usize, @intCast(pos));
+            const haystack_ = s.i.items[0..std.math.clamp(end, 0, s.i.items.len)];
+            const needle_ = needle[0..slen];
 
             var idx: usize = haystack_.len - 1;
             while (idx > 0) : (idx -= 1) {
@@ -526,21 +495,65 @@ test "append" {
 }
 
 test "trimRight" {
+    const a = std.testing.allocator;
+
+    const T = u8;
+
+    const toTrim = " \n\r ";
+
     var str = string(u8).init(std.testing.allocator, "starting\r\n");
     defer str.deinit();
 
-    const toTrim = "\n\r";
     const trimmed = try str.trimRight(toTrim);
     try std.testing.expectEqualStrings("starting", trimmed);
+
+    const test_base_1 = "      \r\tHi, I'm a test string of dubious intent. \r\n ";
+    var str_1 = string(T).init(a, test_base_1);
+    defer str_1.deinit();
+
+    const trimmed_1 = try str_1.trimRight(toTrim);
+    try std.testing.expectEqualStrings("      \r\tHi, I'm a test string of dubious intent.", trimmed_1);
+
+    const test_base_2 = "      \r\tHi, I'm a test string of dubious intent. \r\n \t";
+    var str_2 = string(T).init(a, test_base_2);
+    defer str_2.deinit();
+
+    const trimmed_2 = try str_2.trimRight(toTrim);
+    try std.testing.expectEqualStrings("      \r\tHi, I'm a test string of dubious intent. \r\n \t", trimmed_2);
 }
 
 test "trimLeft" {
-    var str = string(u8).init(std.testing.allocator, "\r\nstarting\r\n ");
+    const a = std.testing.allocator;
+
+    const T = u8;
+
+    var str = string(T).init(a, "\r\nstarting\r\n ");
     defer str.deinit();
 
-    const toTrim = "\n\r";
+    const toTrim = " \n\r";
     const trimmed = try str.trimLeft(toTrim);
-    try std.testing.expectEqualStrings("starting\r\n", trimmed);
+    try std.testing.expectEqualStrings("starting\r\n ", trimmed);
+
+    const test_base_1 = "      \r\tHi, I'm a test string of dubious intent.";
+    var str_1 = string(T).init(a, test_base_1);
+    defer str_1.deinit();
+
+    const trimmed_1 = try str_1.trimLeft(toTrim);
+    try std.testing.expectEqualStrings("\tHi, I'm a test string of dubious intent.", trimmed_1);
+
+    const test_base_2 = "x x";
+    var str_2 = string(T).init(a, test_base_2);
+    defer str_2.deinit();
+
+    const trimmed_2 = try str_2.trimLeft("x");
+    try std.testing.expectEqualStrings(" x", trimmed_2);
+
+    const test_base_3 = "x x ";
+    var str_3 = string(T).init(a, test_base_3);
+    defer str_3.deinit();
+
+    const trimmed_3 = try str_2.trimLeft("x");
+    try std.testing.expectEqualStrings(" x", trimmed_3);
 }
 
 test "trim" {
