@@ -240,6 +240,8 @@ pub fn string(T: type) type {
             const erasure_start = std.math.clamp(pos, 0, s.i.items.len);
             const erasure_end = @min(erasure_start + erasure_len, s.i.items.len);
 
+            if (erasure_len == 0) return s;
+
             var remainder: std.ArrayList(T) = .empty;
             defer remainder.deinit(s.a);
 
@@ -257,11 +259,11 @@ pub fn string(T: type) type {
         }
 
         pub fn replacen(s: *Self, pos: usize, len: i64, buffer: []const T, subpos: usize, sublen: i64) !*Self {
-            if (pos >= s.i.items.len) return StringErrors.ArgumentOutOfRange;
+            if (pos > s.i.items.len) return StringErrors.ArgumentOutOfRange;
             if (subpos >= buffer.len) return StringErrors.ArgumentOutOfRange;
 
             const replacment_len = if (sublen == npos) buffer.len else @as(usize, @intCast(sublen));
-            const replace_original_len: usize = if (len == npos) s.i.items.len - 1 else @intCast(len);
+            const replace_original_len: usize = if (len == npos) s.i.items.len else @intCast(len);
             const replacement_buffer = buffer[subpos..std.math.clamp(subpos + replacment_len, subpos, buffer.len)];
 
             var after: std.ArrayList(T) = .empty;
@@ -412,11 +414,9 @@ pub fn string(T: type) type {
         }
 
         pub fn swap(s: *Self, other: *Self) !void {
-            if (s.raw == null or other.raw == null) return StringErrors.NullArguement;
-
-            const temp = s.a.dupe(T, s.raw.?) catch unreachable;
+            const temp = s.a.dupe(T, s.i.items) catch unreachable;
             defer s.a.free(temp);
-            _ = s.set(other.raw.?);
+            _ = s.set(other.i.items);
             _ = other.set(temp);
         }
 
@@ -808,6 +808,20 @@ test "erase" {
     _ = str_7.erase(str_7.length() - 1, 1);
 
     try std.testing.expectEqualStrings("x ", str_7.str());
+
+    var str_8 = string(T).init(std.testing.allocator, "");
+    defer str_8.deinit();
+
+    _ = str_8.erase(str_8.length(), 1);
+
+    try std.testing.expectEqualStrings("", str_8.str());
+
+    var str_9 = string(T).init(std.testing.allocator, "xyz");
+    defer str_9.deinit();
+
+    _ = str_9.erase(0, 0);
+
+    try std.testing.expectEqualStrings("xyz", str_9.str());
 }
 
 test "replace" {
@@ -861,6 +875,10 @@ test "replace" {
     try std.testing.expectError(StringErrors.ArgumentOutOfRange, str_4.replace(1234, 4, "position beyond string length"));
 }
 test "replacen" {
+    const a = std.testing.allocator;
+
+    const T = u8;
+
     const original = "this is a test string.";
 
     //at beginning and within string
@@ -906,6 +924,14 @@ test "replacen" {
 
     try std.testing.expectEqualStrings("content for your pleasures", str_4.str());
     try std.testing.expectEqual(26, str_4.length());
+
+    var str_5 = string(T).init(a, "content for your pleasure");
+    defer str_5.deinit();
+
+    _ = try str_5.replacen(str_5.length(), string(T).npos, "s", 0, string(T).npos);
+
+    try std.testing.expectEqualStrings("content for your pleasures", str_5.str());
+    try std.testing.expectEqual("content for your pleasures".len, str_5.length());
 
     try std.testing.expectError(StringErrors.ArgumentOutOfRange, str_4.replacen(1234, @intCast(str_4.length() + 1), "position beyond string length", 0, -1));
     try std.testing.expectError(StringErrors.ArgumentOutOfRange, str_4.replacen(1234, 4, "position beyond string length", 0, "position beyond string length".len));
