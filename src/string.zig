@@ -200,9 +200,12 @@ pub fn string(T: type) type {
             return s.i.items.len == 0;
         }
 
-        pub fn fill(s: *Self) *Self {
-            _ = s;
-            unreachable;
+        pub fn fill(s: *Self, value: T, count: usize) *Self {
+            var buffer = s.a.alloc(T, count) catch unreachable;
+            _ = &buffer;
+            defer s.a.free(buffer);
+            @memset(buffer, value);
+            return s.set(buffer);
         }
 
         pub fn clear(s: *Self) *Self {
@@ -483,6 +486,40 @@ test "copy constructor" {
 
     try std.testing.expectEqualStrings("first", str_1.str());
     try std.testing.expectEqual(str_0.length(), str_1.length());
+}
+
+test "fill" {
+    const a = std.testing.allocator;
+
+    const T = u8;
+
+    var str_0 = string(T).init(a, empty_buffer);
+    defer str_0.deinit();
+
+    const test_count_0: usize = 200;
+    const test_char_0 = 'c';
+    _ = str_0.fill('c', test_count_0);
+
+    const expected_0 = try a.alloc(u8, test_count_0);
+    defer a.free(expected_0);
+    @memset(expected_0, test_char_0);
+
+    try std.testing.expectEqual(test_count_0, str_0.length());
+    try std.testing.expectEqualStrings(expected_0, str_0.str());
+
+    const test_count_1: usize = 0;
+    const test_char_1 = 'c';
+    _ = str_0.fill('c', test_count_1);
+
+    var str_1 = string(T).init(a, empty_buffer);
+    defer str_1.deinit();
+
+    const expected_1 = try a.alloc(T, test_count_1);
+    defer a.free(expected_1);
+    @memset(expected_1, test_char_1);
+
+    try std.testing.expectEqual(test_count_1, str_1.length());
+    try std.testing.expectEqualStrings(expected_1, str_1.str());
 }
 
 test "empty string error" {
