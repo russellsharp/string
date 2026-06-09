@@ -418,7 +418,10 @@ pub fn string(T: type) type {
         pub fn swap(s: *Self, other: *Self) !void {
             const temp = s.a.dupe(T, s.i.items) catch unreachable;
             defer s.a.free(temp);
-            _ = s.set(other.i.items);
+            //store the other buffer into a temp buffer in the case of swapping to self.  using the arrayList.items will fail the copy
+            const temp_other = s.a.dupe(T, other.i.items) catch unreachable;
+            defer s.a.free(temp_other);
+            _ = s.set(temp_other);
             _ = other.set(temp);
         }
 
@@ -1127,6 +1130,16 @@ test "find_last_of" {
     const match_last = try str_match_last_element.find_last_of(".", @intCast(test_base.len), 1);
 
     try std.testing.expectEqual(@as(i64, @intCast(test_base.len - 1)), match_last);
+
+    var str_match_empty = string(u8).init(a, empty_buffer);
+    defer str_match_empty.deinit();
+    const match_empty_not_found = try str_match_empty.find_last_of(".", 0, 1);
+
+    try std.testing.expectEqual(-1, match_empty_not_found);
+
+    const match_empty_vs_empty = try str_match_empty.find_last_of("", 0, 1);
+
+    try std.testing.expectEqual(-1, match_empty_vs_empty);
 }
 
 test "find_first_not_of" {
@@ -1151,32 +1164,32 @@ test "find_first_not_of" {
     defer str_match_second.deinit();
 
     const match_second_needle = "A es";
-    const match_second = str_match_second.find_first_not_of(match_second_needle, 4, match_second_needle.len);
+    const match_second = try str_match_second.find_first_not_of(match_second_needle, 4, match_second_needle.len);
 
     try std.testing.expectEqual(5, match_second);
 
     var str_match_second_none = string(u8).init(a, test_base);
     defer str_match_second_none.deinit();
-    const match_second_none = str_match_second_none.find_first_not_of(".", 29, 1);
+    const match_second_none = try str_match_second_none.find_first_not_of(".", 29, 1);
 
     try std.testing.expectEqual(-1, match_second_none);
 
     var str_match_none_beyond = string(u8).init(a, test_base);
     defer str_match_none_beyond.deinit();
-    const match_none_beyond = str_match_none_beyond.find_first_not_of("t", 55, 1);
+    const match_none_beyond = try str_match_none_beyond.find_first_not_of("t", 55, 1);
 
     try std.testing.expectEqual(-1, match_none_beyond);
 
     var str_match_case = string(u8).init(a, test_base);
     defer str_match_case.deinit();
-    const match_case = str_match_case.find_first_not_of("a", 0, 1);
+    const match_case = try str_match_case.find_first_not_of("a", 0, 1);
 
     try std.testing.expectEqual(0, match_case);
 
     //find first character of the first character from the given string
     var str_match_slice_substr = string(u8).init(a, test_base);
     defer str_match_slice_substr.deinit();
-    const match_slice_substr = str_match_slice_substr.find_first_not_of("A test strin", 0, "A test strin".len - 3);
+    const match_slice_substr = try str_match_slice_substr.find_first_not_of("A test strin", 0, "A test strin".len - 3);
 
     try std.testing.expectEqual(@as(i64, @intCast("A test strin".len - 3)), match_slice_substr);
 
@@ -1187,16 +1200,26 @@ test "find_first_not_of" {
     var str_match_empty_needle_by_n = string(u8).init(a, test_base);
     defer str_match_empty_needle_by_n.deinit();
     const needle_empty_needle_by_n = "A test strin";
-    const match_empty_needle_by_n = str_match_slice_substr.find_first_not_of(needle_empty_needle_by_n, 0, 0);
+    const match_empty_needle_by_n = try str_match_empty_needle_by_n.find_first_not_of(needle_empty_needle_by_n, 0, 0);
 
     try std.testing.expectEqual(0, match_empty_needle_by_n);
 
     var str_match_empty_needle = string(u8).init(a, test_base);
     defer str_match_empty_needle.deinit();
     const needle_empty_needle = "";
-    const match_empty_needle = str_match_slice_substr.find_first_not_of(needle_empty_needle, 0, 0);
+    const match_empty_needle = try str_match_empty_needle.find_first_not_of(needle_empty_needle, 0, 0);
 
     try std.testing.expectEqual(0, match_empty_needle);
+
+    var str_match_empty_haystack = string(u8).init(a, empty_buffer);
+    defer str_match_empty_haystack.deinit();
+    const match_empty_haystack = str_match_slice_substr.find_first_not_of(",", 0, 0);
+
+    try std.testing.expectEqual(0, match_empty_haystack);
+
+    const match_empty_haystack_vs_empty_needle = try str_match_empty_haystack.find_first_not_of("", 0, 0);
+
+    try std.testing.expectEqual(0, match_empty_haystack_vs_empty_needle);
 }
 
 test "find_last_not_of" {
@@ -1253,6 +1276,23 @@ test "find_last_not_of" {
     const match_empty = try str_blank.find_last_not_of(empty_buffer, string(T).npos, empty_buffer.len);
 
     try std.testing.expectEqual(0, match_empty);
+
+    var str_match_empty_needle = string(u8).init(a, test_base);
+    defer str_match_empty_needle.deinit();
+    const needle_empty_needle = "";
+    const match_empty_needle = try str_match_empty_needle.find_last_not_of(needle_empty_needle, 0, 0);
+
+    try std.testing.expectEqual(-1, match_empty_needle);
+
+    var str_match_empty_haystack = string(u8).init(a, empty_buffer);
+    defer str_match_empty_haystack.deinit();
+    const match_empty_haystack = str_match_empty_haystack.find_last_not_of(",", 0, 0);
+
+    try std.testing.expectEqual(-1, match_empty_haystack);
+
+    const match_empty_haystack_vs_empty_needle = try str_match_empty_haystack.find_last_not_of("", 0, 0);
+
+    try std.testing.expectEqual(-1, match_empty_haystack_vs_empty_needle);
 }
 
 test "compare" {
@@ -1668,6 +1708,12 @@ test "swap" {
 
     //empty strings are the default
     try str_null_0.swap(@constCast(&str_null_1));
+
+    var str_self_2 = string(T).init(a, test_base);
+    defer str_self_2.deinit();
+
+    try str_self_2.swap(&str_self_2);
+    try std.testing.expectEqualStrings(test_base, str_self_2.str());
 }
 
 test "deinit" {
