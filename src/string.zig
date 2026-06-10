@@ -146,6 +146,10 @@ pub fn string(T: type) type {
             return s.i.items.len;
         }
 
+        pub fn size(s: *Self) usize {
+            return s.length();
+        }
+
         pub fn capacity(s: *Self) usize {
             return s.i.capacity;
         }

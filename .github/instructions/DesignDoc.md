@@ -7,7 +7,7 @@ Create a string library in zig that is heavily inspired by C++.  It will not be 
 
 Methods
 - Mutating 
-- Constructors (init in zig 
+- Constructors (init in zig)
 - Search
 - Informational
 - Memory Management
