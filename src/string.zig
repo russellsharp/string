@@ -232,11 +232,11 @@ pub fn string(T: type) type {
             return s;
         }
 
-        pub fn erase(s: *Self, pos: usize, len: usize) *Self {
+        pub fn erase(s: *Self, pos: usize, len: i64) *Self {
             //could throw errors if pos is beyond string length, but won't.
             if (pos > s.i.items.len) return s;
 
-            const erasure_len = if (len == npos) s.i.items.len else len;
+            const erasure_len = if (len == npos) s.i.items.len else @as(usize, @intCast(len));
             const erasure_start = std.math.clamp(pos, 0, s.i.items.len);
             const erasure_end = @min(erasure_start + erasure_len, s.i.items.len);
 
@@ -827,6 +827,22 @@ test "erase" {
     _ = str_9.erase(0, 0);
 
     try std.testing.expectEqualStrings("xyz", str_9.str());
+
+    // len = string(T).npos
+    var str_10 = string(T).init(std.testing.allocator, "xyz");
+    defer str_10.deinit();
+
+    _ = str_10.erase(0, @intCast(string(T).npos));
+
+    try std.testing.expectEqualStrings("", str_10.str());
+
+    // pos == len
+    var str_11 = string(T).init(std.testing.allocator, "xyu");
+    defer str_11.deinit();
+
+    _ = str_11.erase(str_11.length(), @intCast(string(T).npos));
+
+    try std.testing.expectEqualStrings("xyu", str_11.str());
 }
 
 test "replace" {
@@ -1219,7 +1235,7 @@ test "find_first_not_of" {
 
     const match_empty_haystack_vs_empty_needle = try str_match_empty_haystack.find_first_not_of("", 0, 0);
 
-    try std.testing.expectEqual(0, match_empty_haystack_vs_empty_needle);
+    try std.testing.expectEqual(-1, match_empty_haystack_vs_empty_needle);
 }
 
 test "find_last_not_of" {
