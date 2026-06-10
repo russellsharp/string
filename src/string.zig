@@ -29,15 +29,6 @@ pub fn string(T: type) type {
             return s;
         }
 
-        pub fn copy(a: std.mem.Allocator, source: string(T)) Self {
-            var s = Self{ .a = a, .i = .empty, ._disposed = false };
-            const copy_buffer = a.dupe(T, source.i.items) catch unreachable;
-            defer a.free(copy_buffer);
-            s.i.appendSlice(a, copy_buffer) catch unreachable;
-            s.set_internal_buffers();
-            return s;
-        }
-
         pub fn from_arrayList(a: std.mem.Allocator, list: std.ArrayList(T)) Self {
             return .init(a, list.items);
         }
@@ -66,158 +57,35 @@ pub fn string(T: type) type {
             return c;
         }
 
-        pub fn append(s: *Self, suffix: []const T) *Self {
-            s.i.appendSlice(s.a, suffix) catch unreachable;
-            s.set_internal_buffers();
-            return s;
-        }
+        //capacity methods
 
-        pub fn back(s: *Self) !?T {
-            if (s.empty()) return StringErrors.EmptyString;
-            return s.i.items[s.i.items.len - 1];
-        }
-
-        pub fn starts_with(s: *Self, buffer: []const T) !bool {
-            if (buffer.len > s.length()) return false;
-
-            return (try s.find(buffer, 0, @intCast(buffer.len))) == 0;
-        }
-
-        pub fn ends_with(s: *Self, buffer: []const T) !bool {
-            if (buffer.len > s.length()) return false;
-
-            const relevant = s.i.items[s.i.items.len - buffer.len .. s.i.items.len];
-
-            return std.mem.eql(T, relevant, buffer);
-        }
-
-        pub fn contains(s: *Self, buffer: []const T) !bool {
-            return try s.find(buffer, 0, @intCast(buffer.len)) != npos;
-        }
-
-        pub fn trimRight(s: *Self, charactersToTrim: []const T) ![]T {
-            if (charactersToTrim.len < 1) return StringErrors.InvalidArgument;
-            if (s.i.items.len < 1) return StringErrors.EmptyString;
-
-            const last: usize = @intCast(try s.find_last_not_of(charactersToTrim, @intCast(s.length()), npos));
-
-            const trimmed = try s.a.dupe(T, s.i.items[0 .. last + 1]);
-            defer s.a.free(trimmed);
-
-            return s.set(trimmed).str();
-        }
-
-        pub fn trimLeft(s: *Self, charactersToTrim: []const T) ![]T {
-            if (charactersToTrim.len < 1) return StringErrors.InvalidArgument;
-            if (s.i.items.len < 1) return StringErrors.EmptyString;
-
-            const first: usize = @intCast(try s.find_first_not_of(charactersToTrim, 0, charactersToTrim.len));
-
-            const trimmed = try s.a.dupe(T, s.i.items[first..s.i.items.len]);
-            defer s.a.free(trimmed);
-
-            return s.set(trimmed).str();
-        }
-
-        pub fn trim(s: *Self, charactersToTrim: []const T) ![]T {
-            if (charactersToTrim.len < 1) return StringErrors.InvalidArgument;
-            if (s.i.items.len < 1) return StringErrors.EmptyString;
-
-            const first: usize = @intCast(try s.find_first_not_of(charactersToTrim, 0, charactersToTrim.len));
-            const last: usize = @intCast(try s.find_last_not_of(charactersToTrim, @intCast(s.length()), @as(i64, @intCast(charactersToTrim.len))) + 1);
-
-            const trimmed = try s.a.dupe(T, s.i.items[first..last]);
-            defer s.a.free(trimmed);
-
-            //s.set sets internal buffers
-            return s.set(trimmed).str();
-        }
-
-        pub fn substr(s: *Self, index: usize, count: i64) ![]T {
-            if (index > s.i.items.len) return StringErrors.ArgumentOutOfRange;
-
-            const char_count: usize = if (count == npos) s.i.items.len else @intCast(count);
-            const start: usize = index;
-            const end: usize = std.math.clamp(index + char_count, index, s.i.items.len);
-            return try s.a.dupe(T, s.i.items[start..end]);
+        pub fn size(s: *Self) usize {
+            return s.length();
         }
 
         pub fn length(s: *Self) usize {
             return s.i.items.len;
         }
 
-        pub fn size(s: *Self) usize {
-            return s.length();
+        pub fn resize(s: *Self, new_capacity: usize, value: ?T) *Self {
+            if (new_capacity > s.i.items.len and value != null) {
+                const growth = new_capacity - s.i.items.len;
+                const slice_ = s.i.addManyAsSlice(s.a, growth) catch unreachable;
+                if (value) |c| @memset(slice_, c);
+            } else if (new_capacity < s.i.items.len) {
+                s.i.shrinkAndFree(s.a, new_capacity);
+            }
+            s.set_internal_buffers();
+            return s;
         }
 
         pub fn capacity(s: *Self) usize {
             return s.i.capacity;
         }
 
-        pub fn compare(s: *Self, b: []const T) !i8 {
-            return try s.comparen(0, s.i.items.len, b, -1);
-        }
-
-        pub fn comparen(s: *Self, pos: usize, len: usize, b: []const T, n: i32) !i8 {
-            if (pos >= s.i.items.len) return StringErrors.ArgumentOutOfRange;
-            const num_of_chars: usize = @intCast(if (n == npos) @max(s.i.items.len, b.len) else @as(u64, @intCast(n)));
-            const compared = s.i.items[pos..std.math.clamp(pos + len, pos, s.i.items.len)];
-            const comparing = b[0..std.math.clamp(num_of_chars, 0, b.len)];
-
-            var idx: usize = 0;
-            while (idx < comparing.len and idx < compared.len and idx < num_of_chars) : (idx += 1) {
-                const c = compared[idx];
-                // compare characters from  each string
-                if (c > comparing[idx]) {
-                    return 1;
-                } else if (comparing[idx] > c) {
-                    return -1;
-                }
-            }
-
-            if (idx == num_of_chars) {
-                return 0;
-            }
-
-            //if we run out of characters in both strings at the same length
-            if (idx == compared.len and idx == comparing.len) {
-                return 0;
-            }
-
-            //haven't reached n, exhausted comparedcharacters
-            if (idx == compared.len and idx < comparing.len) {
-                return -1;
-            }
-
-            //haven't reached n, exhausted comparing characters
-            if (idx == comparing.len and idx < compared.len) {
-                return 1;
-            }
-            return 0;
-        }
-
-        pub fn data(s: *Self) []const T {
-            return s.str();
-        }
-
-        pub fn empty(s: *Self) bool {
-            return s.i.items.len == 0;
-        }
-
-        pub fn fill(s: *Self, value: T, count: usize) *Self {
-            var buffer = s.a.alloc(T, count) catch unreachable;
-            _ = &buffer;
-            defer s.a.free(buffer);
-
-            if (T == u8) {
-                @memset(buffer, value);
-            } else {
-                inline for (buffer) |element| {
-                    element.* = value;
-                }
-            }
-
-            return s.set(buffer);
+        pub fn reserve(s: *Self, new_capacity: usize) *Self {
+            s.i.ensureTotalCapacity(s.a, new_capacity) catch unreachable;
+            return s;
         }
 
         pub fn clear(s: *Self) *Self {
@@ -225,13 +93,49 @@ pub fn string(T: type) type {
             return s.set(empty_buffer);
         }
 
-        pub fn assign(s: *Self, buffer: []const T) *Self {
-            return s.set(buffer);
+        pub fn empty(s: *Self) bool {
+            return s.i.items.len == 0;
         }
+
+        pub fn shrink_to_fit(s: *Self) *Self {
+            s.i.shrinkToLen(s.a) catch unreachable;
+            s.set_internal_buffers();
+            return s;
+        }
+
+        // element access
 
         pub fn at(s: *Self, pos: usize) !T {
             if (pos >= s.i.items.len) return StringErrors.InvalidArgument;
             return s.i.items[pos];
+        }
+
+        pub fn back(s: *Self) !?T {
+            if (s.empty()) return StringErrors.EmptyString;
+            return s.i.items[s.i.items.len - 1];
+        }
+
+        pub fn front(s: *Self) !?T {
+            if (s.empty()) return StringErrors.EmptyString;
+            return s.i.items[0];
+        }
+
+        // modifiers
+
+        pub fn append(s: *Self, suffix: []const T) *Self {
+            s.i.appendSlice(s.a, suffix) catch unreachable;
+            s.set_internal_buffers();
+            return s;
+        }
+
+        pub fn push_back(s: *Self, element: T) *Self {
+            s.i.append(s.a, element) catch unreachable;
+            s.set_internal_buffers();
+            return s;
+        }
+
+        pub fn assign(s: *Self, buffer: []const T) *Self {
+            return s.set(buffer);
         }
 
         pub fn insert(s: *Self, pos: usize, value: []const T) *Self {
@@ -292,6 +196,67 @@ pub fn string(T: type) type {
             s.i.deinit(s.a);
             s.i = cloneList(s.a, T, after) catch unreachable;
 
+            s.set_internal_buffers();
+            return s;
+        }
+
+        pub fn swap(s: *Self, other: *Self) !void {
+            const temp = s.a.dupe(T, s.i.items) catch unreachable;
+            defer s.a.free(temp);
+            //store the other buffer into a temp buffer in the case of swapping to self.  using the arrayList.items will fail the copy
+            const temp_other = s.a.dupe(T, other.i.items) catch unreachable;
+            defer s.a.free(temp_other);
+            _ = s.set(temp_other);
+            _ = other.set(temp);
+        }
+
+        pub fn pop_back(s: *Self) ?T {
+            const element = s.i.pop();
+            s.set_internal_buffers();
+            return element;
+        }
+
+        // string operations
+
+        pub fn c_str(s: *Self, a: std.mem.Allocator, buffer: *[]T) !usize {
+            return try s.stru(a, buffer);
+        }
+
+        pub fn data(s: *Self) []const T {
+            return s.str();
+        }
+
+        pub fn str(s: *Self) []T {
+            s.set_internal_buffers();
+            return s.raw.?;
+        }
+
+        pub fn strSentinel(s: *Self) [:sentinel]T {
+            s.set_internal_buffers();
+            return s.rawSentinel.?;
+        }
+
+        //set contents of buffer and return buffer length, caller is responsible for freeing buffer
+        pub fn stru(s: *Self, a: std.mem.Allocator, buffer: *[]T) !usize {
+            buffer.* = try a.dupe(T, s.i.items);
+            return buffer.len;
+        }
+
+        //set contents of buffer and return buffer length, caller is responsible for freeing buffer
+        pub fn strSentinelu(s: *Self, a: std.mem.Allocator, buffer: *[:sentinel]T) !usize {
+            buffer.* = try a.dupeSentinel(T, s.i.items, sentinel);
+            return buffer.len;
+        }
+
+        pub fn get_allocator(s: *Self) std.mem.Allocator {
+            return s.a;
+        }
+
+        pub fn copy(a: std.mem.Allocator, source: string(T)) Self {
+            var s = Self{ .a = a, .i = .empty, ._disposed = false };
+            const copy_buffer = a.dupe(T, source.i.items) catch unreachable;
+            defer a.free(copy_buffer);
+            s.i.appendSlice(a, copy_buffer) catch unreachable;
             s.set_internal_buffers();
             return s;
         }
@@ -390,45 +355,134 @@ pub fn string(T: type) type {
             return -1;
         }
 
-        pub fn get_allocator(s: *Self) std.mem.Allocator {
-            return s.a;
+        pub fn substr(s: *Self, index: usize, count: i64) ![]T {
+            if (index > s.i.items.len) return StringErrors.ArgumentOutOfRange;
+
+            const char_count: usize = if (count == npos) s.i.items.len else @intCast(count);
+            const start: usize = index;
+            const end: usize = std.math.clamp(index + char_count, index, s.i.items.len);
+            return try s.a.dupe(T, s.i.items[start..end]);
         }
 
-        pub fn pop_back(s: *Self) ?T {
-            const element = s.i.pop();
-            s.set_internal_buffers();
-            return element;
+        pub fn compare(s: *Self, b: []const T) !i8 {
+            return try s.comparen(0, s.i.items.len, b, -1);
         }
 
-        pub fn push_back(s: *Self, element: T) *Self {
-            s.i.append(s.a, element) catch unreachable;
-            s.set_internal_buffers();
-            return s;
-        }
+        pub fn comparen(s: *Self, pos: usize, len: usize, b: []const T, n: i32) !i8 {
+            if (pos >= s.i.items.len) return StringErrors.ArgumentOutOfRange;
+            const num_of_chars: usize = @intCast(if (n == npos) @max(s.i.items.len, b.len) else @as(u64, @intCast(n)));
+            const compared = s.i.items[pos..std.math.clamp(pos + len, pos, s.i.items.len)];
+            const comparing = b[0..std.math.clamp(num_of_chars, 0, b.len)];
 
-        pub fn reserve(s: *Self, size: usize) *Self {
-            s.i.ensureTotalCapacity(s.a, size) catch unreachable;
-            return s;
-        }
-
-        pub fn resize(s: *Self, size: usize, value: ?T) *Self {
-            if (size > s.i.items.len and value != null) {
-                const growth = size - s.i.items.len;
-                const slice_ = s.i.addManyAsSlice(s.a, growth) catch unreachable;
-                if (value) |c| @memset(slice_, c);
-            } else if (size < s.i.items.len) {
-                s.i.shrinkAndFree(s.a, size);
+            var idx: usize = 0;
+            while (idx < comparing.len and idx < compared.len and idx < num_of_chars) : (idx += 1) {
+                const c = compared[idx];
+                // compare characters from  each string
+                if (c > comparing[idx]) {
+                    return 1;
+                } else if (comparing[idx] > c) {
+                    return -1;
+                }
             }
-            s.set_internal_buffers();
-            return s;
+
+            if (idx == num_of_chars) {
+                return 0;
+            }
+
+            //if we run out of characters in both strings at the same length
+            if (idx == compared.len and idx == comparing.len) {
+                return 0;
+            }
+
+            //haven't reached n, exhausted comparedcharacters
+            if (idx == compared.len and idx < comparing.len) {
+                return -1;
+            }
+
+            //haven't reached n, exhausted comparing characters
+            if (idx == comparing.len and idx < compared.len) {
+                return 1;
+            }
+            return 0;
         }
 
-        pub fn shrink_to_fit(s: *Self) *Self {
-            s.i.shrinkToLen(s.a) catch unreachable;
-            s.set_internal_buffers();
-            return s;
+        // miscellaneous string methods
+
+        pub fn starts_with(s: *Self, buffer: []const T) !bool {
+            if (buffer.len > s.length()) return false;
+
+            return (try s.find(buffer, 0, @intCast(buffer.len))) == 0;
         }
 
+        pub fn ends_with(s: *Self, buffer: []const T) !bool {
+            if (buffer.len > s.length()) return false;
+
+            const relevant = s.i.items[s.i.items.len - buffer.len .. s.i.items.len];
+
+            return std.mem.eql(T, relevant, buffer);
+        }
+
+        pub fn contains(s: *Self, buffer: []const T) !bool {
+            return try s.find(buffer, 0, @intCast(buffer.len)) != npos;
+        }
+
+        // string mutating  methods
+
+        pub fn trimRight(s: *Self, charactersToTrim: []const T) ![]T {
+            if (charactersToTrim.len < 1) return StringErrors.InvalidArgument;
+            if (s.i.items.len < 1) return StringErrors.EmptyString;
+
+            const last: usize = @intCast(try s.find_last_not_of(charactersToTrim, @intCast(s.length()), npos));
+
+            const trimmed = try s.a.dupe(T, s.i.items[0 .. last + 1]);
+            defer s.a.free(trimmed);
+
+            return s.set(trimmed).str();
+        }
+
+        pub fn trimLeft(s: *Self, charactersToTrim: []const T) ![]T {
+            if (charactersToTrim.len < 1) return StringErrors.InvalidArgument;
+            if (s.i.items.len < 1) return StringErrors.EmptyString;
+
+            const first: usize = @intCast(try s.find_first_not_of(charactersToTrim, 0, charactersToTrim.len));
+
+            const trimmed = try s.a.dupe(T, s.i.items[first..s.i.items.len]);
+            defer s.a.free(trimmed);
+
+            return s.set(trimmed).str();
+        }
+
+        pub fn trim(s: *Self, charactersToTrim: []const T) ![]T {
+            if (charactersToTrim.len < 1) return StringErrors.InvalidArgument;
+            if (s.i.items.len < 1) return StringErrors.EmptyString;
+
+            const first: usize = @intCast(try s.find_first_not_of(charactersToTrim, 0, charactersToTrim.len));
+            const last: usize = @intCast(try s.find_last_not_of(charactersToTrim, @intCast(s.length()), @as(i64, @intCast(charactersToTrim.len))) + 1);
+
+            const trimmed = try s.a.dupe(T, s.i.items[first..last]);
+            defer s.a.free(trimmed);
+
+            //s.set sets internal buffers
+            return s.set(trimmed).str();
+        }
+
+        pub fn fill(s: *Self, value: T, count: usize) *Self {
+            var buffer = s.a.alloc(T, count) catch unreachable;
+            _ = &buffer;
+            defer s.a.free(buffer);
+
+            if (T == u8) {
+                @memset(buffer, value);
+            } else {
+                inline for (buffer) |element| {
+                    element.* = value;
+                }
+            }
+
+            return s.set(buffer);
+        }
+
+        // string non-mutating methods
         pub fn span(s: *Self, index: usize, len: usize) ![]T {
             return s.slice(index, len);
         }
@@ -438,46 +492,12 @@ pub fn string(T: type) type {
             return s.a.dupe(T, s.i.items[index..std.math.clamp(index + len, 0, s.i.items.len)]) catch unreachable;
         }
 
-        pub fn swap(s: *Self, other: *Self) !void {
-            const temp = s.a.dupe(T, s.i.items) catch unreachable;
-            defer s.a.free(temp);
-            //store the other buffer into a temp buffer in the case of swapping to self.  using the arrayList.items will fail the copy
-            const temp_other = s.a.dupe(T, other.i.items) catch unreachable;
-            defer s.a.free(temp_other);
-            _ = s.set(temp_other);
-            _ = other.set(temp);
-        }
-
+        // private methods
         inline fn set(s: *Self, value: []const T) *Self {
             s.i.clearRetainingCapacity();
             s.i.appendSlice(s.a, value) catch unreachable;
             s.set_internal_buffers();
             return s;
-        }
-
-        pub fn str(s: *Self) []T {
-            s.set_internal_buffers();
-            return s.raw.?;
-        }
-
-        pub fn strSentinel(s: *Self) [:sentinel]T {
-            s.set_internal_buffers();
-            return s.rawSentinel.?;
-        }
-
-        //set contents of buffer and return buffer length, caller is responsible for freeing buffer
-        pub fn stru(s: *Self, a: std.mem.Allocator, buffer: *[]T) !usize {
-            buffer.* = try a.dupe(T, s.i.items);
-            return buffer.len;
-        }
-
-        pub fn c_str(s: *Self, a: std.mem.Allocator, buffer: *[]T) !usize {
-            return try s.stru(a, buffer);
-        }
-
-        pub fn strSentinelu(s: *Self, a: std.mem.Allocator, buffer: *[:sentinel]T) !usize {
-            buffer.* = try a.dupeSentinel(T, s.i.items, sentinel);
-            return buffer.len;
         }
 
         inline fn set_internal_buffers(s: *Self) void {
