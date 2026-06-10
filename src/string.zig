@@ -1,7 +1,7 @@
 const std = @import("std");
 const cloneList = @import("clone.zig").cloneArrayList;
 
-const StringErrors = error{ InvalidArgument, EmptyString, ArgumentOutOfRange, NullArguement };
+pub const StringErrors = error{ InvalidArgument, EmptyString, ArgumentOutOfRange, NullArguement };
 
 pub const empty_buffer = "";
 
