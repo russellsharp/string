@@ -2,3 +2,7 @@
 const std = @import("std");
 const Io = std.Io;
 const string = @import("string");
+
+test {
+    _ = @import("string.test.zig");
+}
