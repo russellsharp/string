@@ -284,7 +284,10 @@ pub fn string(T: type) type {
         }
 
         pub fn find(s: *Self, needle: []const T, index: usize, len: i64) !i64 {
-            if (index >= s.i.items.len) return StringErrors.InvalidArgument;
+            //if needle is empty, return index by cpp std standards
+            if (needle.len == 0) return @intCast(index);
+
+            if (index > s.i.items.len) return StringErrors.InvalidArgument;
             if (len > needle.len) return StringErrors.InvalidArgument;
 
             const needle_len = if (len == npos) needle.len else @as(usize, @intCast(len));
@@ -295,7 +298,7 @@ pub fn string(T: type) type {
 
             const found = std.mem.find(T, haystack_, needle_);
 
-            return if (found != null) @intCast(found.?) else @as(i64, npos);
+            return if (found) |value| @intCast(value) else @as(i64, npos);
         }
 
         pub fn rfind(s: *Self, needle: []const T, index: usize) !i64 {
@@ -961,6 +964,8 @@ test "replacen" {
 test "find" {
     const a = std.testing.allocator;
 
+    const T = u8;
+
     const test_bed = "There are two needles in this haystack with needles.";
 
     const needle_0 = "needle";
@@ -995,9 +1000,41 @@ test "find" {
     defer str_3.deinit();
 
     const needle_3 = ".";
-    const found_3 = str_3.find(needle_3, 0, needle_3.len);
+    const found_3 = try str_3.find(needle_3, 0, needle_3.len);
 
     try std.testing.expectEqual(51, found_3);
+
+    var str_4 = string(T).init(a, test_bed);
+    defer str_4.deinit();
+
+    const needle_4 = "";
+    const found_4 = try str_4.find(needle_4, str_4.length(), needle_4.len);
+
+    try std.testing.expectEqual(str_4.length(), @as(usize, @intCast(found_4)));
+
+    var str_5 = string(T).init(a, test_bed);
+    defer str_5.deinit();
+
+    const needle_5 = "";
+    const found_5 = try str_5.find(needle_5, 0, needle_5.len);
+
+    try std.testing.expectEqual(0, @as(usize, @intCast(found_5)));
+
+    var str_6 = string(T).init(a, test_bed);
+    defer str_6.deinit();
+
+    const needle_6 = "";
+    const found_6 = try str_6.find(needle_6, 3, @as(usize, @intCast(needle_6.len)));
+
+    try std.testing.expectEqual(3, found_6);
+
+    var str_7 = string(T).init(a, empty_buffer);
+    defer str_7.deinit();
+
+    const needle_7 = ",";
+    const found_7 = try str_6.find(needle_7, 0, string(T).npos);
+
+    try std.testing.expectEqual(-1, found_7);
 }
 
 test "rfind" {
