@@ -204,7 +204,15 @@ pub fn string(T: type) type {
             var buffer = s.a.alloc(T, count) catch unreachable;
             _ = &buffer;
             defer s.a.free(buffer);
-            @memset(buffer, value);
+
+            if (T == u8) {
+                @memset(buffer, value);
+            } else {
+                inline for (buffer) |element| {
+                    element.* = value;
+                }
+            }
+
             return s.set(buffer);
         }
 
