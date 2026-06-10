@@ -8,8 +8,8 @@ pub const empty_buffer = "";
 pub fn string(T: type) type {
     return struct {
         const Self = @This();
-        const sentinel: T = 0;
-        const npos: i64 = -1;
+        pub const sentinel: T = 0;
+        pub const npos: i64 = -1;
 
         a: std.mem.Allocator,
         i: std.ArrayList(T) = .empty,
@@ -246,7 +246,7 @@ pub fn string(T: type) type {
             defer remainder.deinit(s.a);
 
             remainder.appendSlice(s.a, s.i.items[0..erasure_start]) catch unreachable;
-            remainder.appendSlice(s.a, s.i.items[erasure_end..s.i.items.len]) catch unreachable;
+            remainder.appendSlice(s.a, s.i.items[erasure_end..]) catch unreachable;
 
             const remaining = remainder.toOwnedSlice(s.a) catch unreachable;
             defer s.a.free(remaining);
@@ -263,8 +263,9 @@ pub fn string(T: type) type {
             if (subpos >= buffer.len) return StringErrors.ArgumentOutOfRange;
 
             const replacment_len = if (sublen == npos) buffer.len else @as(usize, @intCast(sublen));
-            const replace_original_len: usize = if (len == npos) s.i.items.len else @intCast(len);
-            const replacement_buffer = buffer[subpos..std.math.clamp(subpos + replacment_len, subpos, buffer.len)];
+            const replace_original_len: usize = if (len == npos) s.i.items.len - pos else @intCast(len);
+            const replacement_buffer = buffer[subpos..std.math.clamp(subpos + replacment_len + 1, subpos, buffer.len)];
+            const remainder_start = std.math.clamp(pos + replace_original_len, pos, s.i.items.len);
 
             var after: std.ArrayList(T) = .empty;
             defer after.deinit(s.a);
@@ -274,7 +275,7 @@ pub fn string(T: type) type {
             // characters from replacement
             after.appendSlice(s.a, replacement_buffer) catch unreachable;
             // characters after replacement, and after len parameter to replace N characters from the original
-            after.appendSlice(s.a, s.i.items[std.math.clamp(pos + replace_original_len, pos, s.i.items.len)..s.i.items.len]) catch unreachable;
+            after.appendSlice(s.a, s.i.items[remainder_start..]) catch unreachable;
 
             s.i.deinit(s.a);
             s.i = cloneList(s.a, T, after) catch unreachable;
@@ -325,16 +326,20 @@ pub fn string(T: type) type {
             const haystack_ = s.i.items[0..std.math.clamp(index, 0, s.i.items.len)];
             const needle_ = needle[0..std.math.clamp(n, 0, needle.len)];
 
-            var idx: usize = haystack_.len;
-            while (idx > 0) {
-                idx -= 1;
+            if (haystack_.len == 0) return npos;
+
+            var idx: usize = haystack_.len - 1;
+            while (idx >= 0) {
                 if (std.mem.containsAtLeastScalar2(T, needle_, haystack_[idx], 1)) {
                     return @as(i64, @intCast(idx));
                 }
+                if (idx == 0) return -1;
+                idx -= 1;
             }
 
             return -1;
         }
+
         pub fn find_first_not_of(s: *Self, notlist: []const T, index: usize, n: usize) !i64 {
             if (index >= s.i.items.len) return -1;
 
@@ -359,12 +364,15 @@ pub fn string(T: type) type {
             const haystack_ = s.i.items[0..std.math.clamp(end, 0, s.i.items.len)];
             const needle_ = needle[0..slen];
 
-            var idx: usize = haystack_.len;
-            while (idx > 0) {
-                idx -= 1;
+            if (haystack_.len == 0) return npos;
+
+            var idx: usize = haystack_.len - 1;
+            while (idx >= 0) {
                 if (!std.mem.containsAtLeastScalar2(T, needle_, haystack_[idx], 1)) {
                     return @as(i64, @intCast(idx));
                 }
+                if (idx == 0) return -1;
+                idx -= 1;
             }
 
             return -1;
@@ -846,6 +854,30 @@ test "erase" {
     _ = str_11.erase(str_11.length(), @intCast(string(T).npos));
 
     try std.testing.expectEqualStrings("xyu", str_11.str());
+
+    //all but last character
+    var str_12 = string(T).init(std.testing.allocator, "xyu");
+    defer str_12.deinit();
+
+    _ = str_12.erase(0, 2);
+
+    try std.testing.expectEqualStrings("u", str_12.str());
+
+    //all but first character
+    var str_13 = string(T).init(std.testing.allocator, "xyu");
+    defer str_13.deinit();
+
+    _ = str_13.erase(1, 2);
+
+    try std.testing.expectEqualStrings("x", str_13.str());
+
+    //only erase middle character
+    var str_14 = string(T).init(std.testing.allocator, "xyu");
+    defer str_14.deinit();
+
+    _ = str_14.erase(1, 1);
+
+    try std.testing.expectEqualStrings("xu", str_14.str());
 }
 
 test "replace" {
@@ -909,7 +941,7 @@ test "replacen" {
     var str_0 = string(u8).init(std.testing.allocator, original);
     defer str_0.deinit();
 
-    _ = try str_0.replacen(9, 5, "n example", 0, "n_example".len);
+    _ = try str_0.replacen(9, 5, "n example", 0, "n example".len);
 
     try std.testing.expectEqualStrings("this is an example string.", str_0.str());
     try std.testing.expectEqual(26, str_0.length());
@@ -956,6 +988,15 @@ test "replacen" {
 
     try std.testing.expectEqualStrings("content for your pleasures", str_5.str());
     try std.testing.expectEqual("content for your pleasures".len, str_5.length());
+
+    //replace retmaining string portion from pos with shorter string
+    var str_6 = string(T).init(a, "content for your pleasure");
+    defer str_6.deinit();
+
+    _ = try str_6.replacen(17, string(T).npos, "butt", 0, "butt".len + 50);
+
+    try std.testing.expectEqualStrings("content for your butt", str_6.str());
+    try std.testing.expectEqual("content for your butt".len, str_6.length());
 
     try std.testing.expectError(StringErrors.ArgumentOutOfRange, str_4.replacen(1234, @intCast(str_4.length() + 1), "position beyond string length", 0, -1));
     try std.testing.expectError(StringErrors.ArgumentOutOfRange, str_4.replacen(1234, 4, "position beyond string length", 0, "position beyond string length".len));
