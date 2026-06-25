@@ -972,13 +972,14 @@ test "compare" {
 
 test "comparen" {
     const a = std.testing.allocator;
+    const T = u8;
 
     const test_base_a = "A test string of great import.     \r\n ";
     const test_base_b = "A test string of lesser import.     \r\n ";
 
-    var str_a = string(u8).init(a, test_base_a);
+    var str_a = string(T).init(a, test_base_a);
     defer str_a.deinit();
-    var str_b = string(u8).init(a, test_base_b);
+    var str_b = string(T).init(a, test_base_b);
     defer str_b.deinit();
 
     // Given equal inputs, when comparing full ranges, then expect equality.
@@ -995,7 +996,7 @@ test "comparen" {
 
     const test_base_a_longer = "A test string of great import.     \r\n 111111111111";
 
-    var str_a_longer = string(u8).init(a, test_base_a_longer);
+    var str_a_longer = string(T).init(a, test_base_a_longer);
     defer str_a_longer.deinit();
 
     // Given shared prefix with different total lengths, when n exceeds lhs window, then lhs exhaustion decides ordering.
@@ -1016,7 +1017,7 @@ test "comparen" {
     // regression: equal 5-byte prefix must compare as equal regardless of longer suffix.
     try std.testing.expectEqual(0, str_a.comparen(0, 5, str_a_longer.str(), 5));
 
-    var str_small = string(u8).init(a, "abc");
+    var str_small = string(T).init(a, "abc");
     defer str_small.deinit();
 
     // len == 0 and n == 0 yields two empty windows.
@@ -1032,7 +1033,7 @@ test "comparen" {
     try std.testing.expectEqual(1, str_small.comparen(0, 3, "ab", 9));
 
     // a->substr(pos, len).compare(b(s, n))
-    var str_cpp = string(u8).init(a, "apples");
+    var str_cpp = string(T).init(a, "apples");
     defer str_cpp.deinit();
 
     // equal prefixes over n chars should compare equal.
@@ -1041,10 +1042,29 @@ test "comparen" {
     // len extending past end should clamp compared substring and still compare equal.
     try std.testing.expectEqual(0, str_cpp.comparen(1, 99, "pplesauce", 5));
 
-    var str_cpp_shorter = string(u8).init(a, "apple");
+    var str_cpp_shorter = string(T).init(a, "apple");
     defer str_cpp_shorter.deinit();
 
     try std.testing.expectEqual(-1, str_cpp_shorter.comparen(0, str_cpp_shorter.length(), "applepie", 8));
+
+    //    if (s.i.items.len == 0 and len == 0 and b.len != 0) return -1;
+
+    var lhs_empty = string(T).init(a, empty_buffer);
+    defer lhs_empty.deinit();
+
+    try std.testing.expectEqual(-1, lhs_empty.comparen(0, 0, " ", " ".len));
+    try std.testing.expectEqual(-1, lhs_empty.comparen(0, 0, " ", "  ".len));
+    try std.testing.expectEqual(0, lhs_empty.comparen(0, 1, " ", "".len));
+    try std.testing.expectEqual(-1, lhs_empty.comparen(0, 1, " ", " ".len));
+    try std.testing.expectEqual(0, lhs_empty.comparen(0, 0, "", "".len));
+
+    var lhs_single_char = string(T).init(a, " ");
+    defer lhs_single_char.deinit();
+
+    try std.testing.expectEqual(-1, lhs_single_char.comparen(0, lhs_single_char.length(), "1", "1".len));
+
+    try std.testing.expectEqual(-1, str_small.comparen(str_small.length(), 0, "xyz", 2));
+    try std.testing.expectEqual(0, str_small.comparen(str_small.length(), 0, "", 0));
 }
 
 test "starts_with" {

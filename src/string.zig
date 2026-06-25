@@ -369,14 +369,11 @@ pub fn string(T: type) type {
         }
 
         pub fn comparen(s: *Self, pos: usize, len: usize, b: []const T, n: i32) !i8 {
-            if ((s.i.items.len == 0 and b.len != 0) and len != 0) return @intCast(npos);
-            if (pos >= s.i.items.len) return StringErrors.ArgumentOutOfRange;
-            if (s.i.items.len == 0 and b.len == 0) return 0;
-            if (s.i.items.len == 0 and len == 0) return 0;
+            if (pos > s.i.items.len) return StringErrors.ArgumentOutOfRange;
 
-            const num_of_chars: usize = @intCast(if (n == npos) @max(s.i.items.len, b.len) else @as(u64, @intCast(n)));
             const compared = s.i.items[pos..std.math.clamp(pos + len, pos, s.i.items.len)];
-            const comparing = b[0..std.math.clamp(num_of_chars, 0, b.len)];
+            const comparing = b[0..std.math.clamp(if (n == npos) b.len else @as(usize, @intCast(n)), 0, b.len)];
+            const num_of_chars: usize = if (n == npos) @max(compared.len, comparing.len) else @as(usize, @intCast(n));
 
             if (compared.len == 0 and comparing.len == 0) return 0;
 
