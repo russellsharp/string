@@ -262,11 +262,11 @@ pub fn string(T: type) type {
         }
 
         pub fn find(s: *Self, needle: []const T, index: usize, len: i64) !i64 {
-            //if needle is empty, return index by cpp std standards
-            if (needle.len == 0) return @intCast(index);
-
             if (index > s.i.items.len) return StringErrors.InvalidArgument;
             if (len > needle.len) return StringErrors.InvalidArgument;
+
+            //if needle is empty, return index by cpp std standards
+            if (needle.len == 0) return @intCast(index);
 
             const needle_len = if (len == npos) needle.len else @as(usize, @intCast(len));
             const needle_ = needle[0..needle_len];
@@ -276,11 +276,11 @@ pub fn string(T: type) type {
 
             const found = std.mem.find(T, haystack_, needle_);
 
-            return if (found) |value| @intCast(value) else @as(i64, npos);
+            return if (found) |value| @intCast(value + index) else @as(i64, npos);
         }
 
         pub fn rfind(s: *Self, needle: []const T, index: usize) !i64 {
-            const haystack_ = s.i.items[0..std.math.clamp(index, 0, s.i.items.len)];
+            const haystack_ = s.i.items[0..std.math.clamp(index + 1, 0, s.i.items.len)];
             const idx = std.mem.findLast(T, haystack_, needle);
             return if (idx) |i| @as(i64, @intCast(i)) else -1;
         }
@@ -300,7 +300,7 @@ pub fn string(T: type) type {
         }
 
         pub fn find_last_of(s: *Self, needle: []const T, index: usize, n: usize) !i64 {
-            const haystack_ = s.i.items[0..std.math.clamp(index, 0, s.i.items.len)];
+            const haystack_ = s.i.items[0..std.math.clamp(index + 1, 0, s.i.items.len)];
             const needle_ = needle[0..std.math.clamp(n, 0, needle.len)];
 
             if (haystack_.len == 0) return npos;
@@ -369,10 +369,16 @@ pub fn string(T: type) type {
         }
 
         pub fn comparen(s: *Self, pos: usize, len: usize, b: []const T, n: i32) !i8 {
+            if ((s.i.items.len == 0 and b.len != 0) and len != 0) return @intCast(npos);
             if (pos >= s.i.items.len) return StringErrors.ArgumentOutOfRange;
+            if (s.i.items.len == 0 and b.len == 0) return 0;
+            if (s.i.items.len == 0 and len == 0) return 0;
+
             const num_of_chars: usize = @intCast(if (n == npos) @max(s.i.items.len, b.len) else @as(u64, @intCast(n)));
             const compared = s.i.items[pos..std.math.clamp(pos + len, pos, s.i.items.len)];
             const comparing = b[0..std.math.clamp(num_of_chars, 0, b.len)];
+
+            if (compared.len == 0 and comparing.len == 0) return 0;
 
             var idx: usize = 0;
             while (idx < comparing.len and idx < compared.len and idx < num_of_chars) : (idx += 1) {
@@ -432,9 +438,16 @@ pub fn string(T: type) type {
             if (charactersToTrim.len < 1) return StringErrors.InvalidArgument;
             if (s.i.items.len < 1) return StringErrors.EmptyString;
 
-            const last: usize = @intCast(try s.find_last_not_of(charactersToTrim, @intCast(s.length()), npos));
+            const last_not_of = try s.find_last_not_of(charactersToTrim, @intCast(s.length()), npos);
 
-            const trimmed = try s.a.dupe(T, s.i.items[0 .. last + 1]);
+            //if every character is to be trimmed, special case returns an empty string
+            if (last_not_of == npos) {
+                return s.set(empty_buffer).str();
+            }
+
+            const last: usize = if (last_not_of >= 0) @intCast(last_not_of) else 0;
+
+            const trimmed = try s.a.dupe(T, s.i.items[0..std.math.clamp(last + 1, 0, s.i.items.len)]);
             defer s.a.free(trimmed);
 
             return s.set(trimmed).str();
@@ -444,7 +457,9 @@ pub fn string(T: type) type {
             if (charactersToTrim.len < 1) return StringErrors.InvalidArgument;
             if (s.i.items.len < 1) return StringErrors.EmptyString;
 
-            const first: usize = @intCast(try s.find_first_not_of(charactersToTrim, 0, charactersToTrim.len));
+            const first_not_of = try s.find_first_not_of(charactersToTrim, 0, charactersToTrim.len);
+
+            const first: usize = if (first_not_of >= 0) @intCast(first_not_of) else s.i.items.len;
 
             const trimmed = try s.a.dupe(T, s.i.items[first..s.i.items.len]);
             defer s.a.free(trimmed);
@@ -456,10 +471,23 @@ pub fn string(T: type) type {
             if (charactersToTrim.len < 1) return StringErrors.InvalidArgument;
             if (s.i.items.len < 1) return StringErrors.EmptyString;
 
-            const first: usize = @intCast(try s.find_first_not_of(charactersToTrim, 0, charactersToTrim.len));
-            const last: usize = @intCast(try s.find_last_not_of(charactersToTrim, @intCast(s.length()), @as(i64, @intCast(charactersToTrim.len))) + 1);
+            const first_not_of = try s.find_first_not_of(charactersToTrim, 0, charactersToTrim.len);
 
-            const trimmed = try s.a.dupe(T, s.i.items[first..last]);
+            if (first_not_of == npos) {
+                return s.set(empty_buffer).str();
+            }
+
+            const first: usize = if (first_not_of >= 0) @intCast(first_not_of) else s.i.items.len;
+
+            const last_not_of = try s.find_last_not_of(charactersToTrim, @intCast(s.length()), @as(i64, @intCast(charactersToTrim.len)));
+
+            if (last_not_of == npos) {
+                return s.set(empty_buffer).str();
+            }
+
+            const last: usize = if (last_not_of >= 0) @intCast(last_not_of) else 0;
+
+            const trimmed = try s.a.dupe(T, s.i.items[first..std.math.clamp(last + 1, 0, s.i.items.len)]);
             defer s.a.free(trimmed);
 
             //s.set sets internal buffers

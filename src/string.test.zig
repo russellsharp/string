@@ -109,6 +109,13 @@ test "trimRight" {
 
     const trimmed_2 = try str_2.trimRight(toTrim);
     try std.testing.expectEqualStrings("      \r\tHi, I'm a test string of dubious intent. \r\n \t", trimmed_2);
+
+    const test_base_blank = "        ";
+    var str_blank = string(T).init(a, test_base_blank);
+    defer str_blank.deinit();
+
+    const trimmed_blank = try str_blank.trimRight(" ");
+    try std.testing.expectEqualStrings("", trimmed_blank);
 }
 
 test "trimLeft" {
@@ -143,16 +150,40 @@ test "trimLeft" {
 
     const trimmed_3 = try str_2.trimLeft("x");
     try std.testing.expectEqualStrings(" x", trimmed_3);
+
+    const test_base_blank = "        ";
+    var str_blank = string(T).init(a, test_base_blank);
+    defer str_blank.deinit();
+
+    const trimmed_blank = try str_blank.trimLeft(" ");
+    try std.testing.expectEqualStrings("", trimmed_blank);
 }
 
 test "trim" {
-    var str = string(u8).init(std.testing.allocator, "\r\nstar\r\nting\r\n");
+    const T = u8;
+    const a = std.testing.allocator;
+
+    var str = string(T).init(a, "\r\nstar\r\nting\r\n");
     defer str.deinit();
 
     const toTrim = "\n\r";
     const trimmed = try str.trim(toTrim);
 
     try std.testing.expectEqualStrings("star\r\nting", trimmed);
+
+    const test_base_blank = "        ";
+    var str_blank = string(T).init(a, test_base_blank);
+    defer str_blank.deinit();
+
+    const trimmed_blank = try str_blank.trim(" ");
+    try std.testing.expectEqualStrings("", trimmed_blank);
+
+    const test_base_x = "  x";
+    var str_x = string(T).init(a, test_base_x);
+    defer str_x.deinit();
+
+    const trimmed_x = try str_x.trim(" ");
+    try std.testing.expectEqualStrings("x", trimmed_x);
 }
 
 test "substr(index, length)" {
@@ -549,7 +580,7 @@ test "find" {
 
     const found_2 = str_2.find(needle_0, @as(usize, @intCast(found_0)) + 1, needle_0.len);
 
-    try std.testing.expectEqual(29, found_2);
+    try std.testing.expectEqual(44, found_2);
 
     // starting from str beginning, find the first 6 characters of the needle
     var str_1 = string(u8).init(a, test_bed);
@@ -714,7 +745,7 @@ test "find_last_of" {
 
     var str_match_second_none = string(u8).init(a, test_base);
     defer str_match_second_none.deinit();
-    const match_second_none = try str_match_second_none.find_last_of("t", 2, 1);
+    const match_second_none = try str_match_second_none.find_last_of("t", 1, 1);
 
     try std.testing.expectEqual(-1, match_second_none);
 
