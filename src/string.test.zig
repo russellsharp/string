@@ -1544,3 +1544,104 @@ test "set" {
 
     try std.testing.expectEqualStrings("A test string of great import.", test_base_1);
 }
+
+const ContainingStruct = struct {
+    inner: string(u8),
+    pub fn init(a: std.mem.Allocator) ContainingStruct {
+        return ContainingStruct{ .inner = .init(a, "") };
+    }
+
+    pub fn deinit(s: *ContainingStruct) void {
+        @constCast(&s.inner).deinit();
+    }
+};
+
+test "parseJson" {
+    const json_input = "{ \"inner\": \"Hello World!\" }";
+
+    const TargetType = ContainingStruct;
+
+    var json_scanner = std.json.Scanner.initCompleteInput(std.testing.allocator, json_input);
+    defer json_scanner.deinit();
+
+    //    Zig finds your custom `jsonParse` hook at compile-time automatically.
+    var parsed_result = std.json.parseFromTokenSource(
+        TargetType,
+        std.testing.allocator,
+        &json_scanner,
+        .{}, // Parse options
+    ) catch |err| {
+        std.debug.print("Error {any}\n", .{err});
+        return err;
+    };
+    defer parsed_result.deinit();
+
+    var my_container = parsed_result.value;
+    defer my_container.deinit();
+
+    try std.testing.expectEqualStrings("Hello World!", my_container.inner.str());
+}
+
+test "parseJsonFromValue" {
+    const json_input = "{ \"inner\": \"Hello World!\" }";
+
+    var parsed_value = try std.json.parseFromSlice(
+        std.json.Value,
+        std.testing.allocator,
+        json_input,
+        .{},
+    );
+    defer parsed_value.deinit();
+
+    var parsed_result = try std.json.parseFromValue(
+        ContainingStruct,
+        std.testing.allocator,
+        parsed_value.value,
+        .{},
+    );
+    defer parsed_result.deinit();
+
+    var my_container = parsed_result.value;
+    defer my_container.deinit();
+
+    try std.testing.expectEqualStrings("Hello World!", my_container.inner.str());
+}
+
+test "parse_json parses string contents" {
+    const Payload = struct {
+        inner: []const u8,
+        count: usize,
+    };
+
+    var json_buffer = string(u8).init(std.testing.allocator, "{\"inner\":\"Hello World!\",\"count\":3}");
+    defer json_buffer.deinit();
+
+    var parsed = try json_buffer.parse_json(Payload, std.testing.allocator, .{});
+    defer parsed.deinit();
+
+    try std.testing.expectEqualStrings("Hello World!", parsed.value.inner);
+    try std.testing.expectEqual(@as(usize, 3), parsed.value.count);
+}
+
+test "json serializer writes struct with string field" {
+    const SerializableContainer = struct {
+        inner: string(u8),
+        index: usize,
+
+        pub fn deinit(s: *@This()) void {
+            s.inner.deinit();
+        }
+    };
+
+    var value = SerializableContainer{
+        .inner = string(u8).init(std.testing.allocator, "Hello World!"),
+        .index = 7,
+    };
+    defer value.deinit();
+
+    var out: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer out.deinit();
+
+    try std.json.Stringify.value(value, .{}, &out.writer);
+    try std.testing.expectEqualStrings("{\"inner\":\"Hello World!\",\"index\":7}", out.written());
+}

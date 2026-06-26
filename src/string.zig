@@ -15,8 +15,9 @@ pub fn string(T: type) type {
         i: std.ArrayList(T) = .empty,
         raw: ?[]T = null,
         rawSentinel: ?[:0]T = null,
-
         _disposed: bool = false,
+
+        pub const contained_type: type = T;
 
         pub fn init(a: std.mem.Allocator, initial: ?[]const T) Self {
             var s = Self{
@@ -49,7 +50,7 @@ pub fn string(T: type) type {
             }
         }
 
-        pub fn clone(s: Self) Self {
+        pub fn clone(s: *const Self) Self {
             var c = Self{ .a = s.a, .i = std.ArrayList(T).empty, .raw = null, .rawSentinel = null, ._disposed = false };
             if (s.raw) |raw| c.raw = s.a.dupe(T, raw) catch unreachable;
             if (s.rawSentinel) |rawSentinel| c.rawSentinel = s.a.dupeSentinel(T, rawSentinel, 0) catch unreachable;
@@ -93,7 +94,7 @@ pub fn string(T: type) type {
             return s.set(empty_buffer);
         }
 
-        pub fn empty(s: *Self) bool {
+        pub fn empty(s: *const Self) bool {
             return s.i.items.len == 0;
         }
 
@@ -226,8 +227,7 @@ pub fn string(T: type) type {
             return s.str();
         }
 
-        pub fn str(s: *Self) []T {
-            s.set_internal_buffers();
+        pub fn str(s: *const Self) []T {
             return s.raw.?;
         }
 
@@ -507,6 +507,17 @@ pub fn string(T: type) type {
             return s.set(buffer);
         }
 
+        pub fn assign_format(s: *Self, comptime format: []const T, args: anytype) *Self {
+            const formatted = std.fmt.allocPrint(
+                s.a,
+                format,
+                args,
+            ) catch unreachable;
+            defer s.a.free(formatted);
+
+            return s.set(formatted);
+        }
+
         // string non-mutating methods
         pub fn span(s: *Self, index: usize, len: usize) ![]T {
             return s.slice(index, len);
@@ -515,6 +526,49 @@ pub fn string(T: type) type {
         pub fn slice(s: *Self, index: usize, len: usize) ![]T {
             if (index >= s.i.items.len) return StringErrors.ArgumentOutOfRange;
             return s.a.dupe(T, s.i.items[index..std.math.clamp(index + len, 0, s.i.items.len)]) catch unreachable;
+        }
+
+        pub fn parse_json(s: *const Self, comptime U: type, allocator: std.mem.Allocator, options: std.json.ParseOptions) !std.json.Parsed(U) {
+            if (T != u8) @compileError("parse_json is only supported for string(u8).");
+            return std.json.parseFromSlice(U, allocator, s.str(), options);
+        }
+
+        pub fn parse_json_leaky(s: *const Self, comptime U: type, allocator: std.mem.Allocator, options: std.json.ParseOptions) !U {
+            if (T != u8) @compileError("parse_json_leaky is only supported for string(u8).");
+            return std.json.parseFromSliceLeaky(U, allocator, s.str(), options);
+        }
+
+        pub fn jsonStringify(s: Self, jws: *std.json.Stringify) !void {
+            if (T != u8) @compileError("jsonStringify is only supported for string(u8).");
+            try jws.write(s.raw.?);
+        }
+
+        // Add this method so std.json knows how to parse your custom struct
+        pub fn jsonParse(allocator: std.mem.Allocator, source: anytype, options: std.json.ParseOptions) !Self {
+            if (T != u8) @compileError("jsonParse is only supported for string(u8).");
+            const token = try source.nextAllocMax(allocator, .alloc_if_needed, options.max_value_len.?);
+            return switch (token) {
+                .string => |buffer| Self.init(allocator, buffer),
+                .allocated_string => |buffer| blk: {
+                    defer allocator.free(buffer);
+                    break :blk Self.init(allocator, buffer);
+                },
+                else => error.UnexpectedToken,
+            };
+        }
+
+        // 2. Overriding Value-Tree Parsing (Required for nested/dynamic JSON structures)
+        pub fn jsonParseFromValue(
+            allocator: std.mem.Allocator,
+            source: std.json.Value,
+            options: std.json.ParseOptions,
+        ) !Self {
+            _ = options;
+            if (T != u8) @compileError("jsonParseFromValue is only supported for string(u8).");
+            switch (source) {
+                .string => |buffer| return Self.init(allocator, buffer),
+                else => return error.UnexpectedToken,
+            }
         }
 
         // private methods
