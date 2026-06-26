@@ -50,11 +50,16 @@ pub fn string(T: type) type {
             }
         }
 
-        pub fn clone(s: *const Self) Self {
-            var c = Self{ .a = s.a, .i = std.ArrayList(T).empty, .raw = null, .rawSentinel = null, ._disposed = false };
-            if (s.raw) |raw| c.raw = s.a.dupe(T, raw) catch unreachable;
-            if (s.rawSentinel) |rawSentinel| c.rawSentinel = s.a.dupeSentinel(T, rawSentinel, 0) catch unreachable;
-            c.i = s.i.clone(s.a) catch unreachable;
+        pub fn clone(s: *const Self, a: std.mem.Allocator) Self {
+            var c = Self{ .a = a, .i = std.ArrayList(T).empty, .raw = null, .rawSentinel = null, ._disposed = false };
+
+            c.raw = a.alloc(T, s.i.items.len) catch unreachable;
+            std.mem.copyForwards(T, c.raw.?, s.i.items[0..s.i.items.len]);
+
+            c.rawSentinel = a.allocSentinel(T, s.i.items.len, sentinel) catch unreachable;
+            if (s.rawSentinel) |rawSentinel| c.rawSentinel = a.dupeSentinel(T, rawSentinel, 0) catch unreachable;
+
+            c.i = s.i.clone(a) catch unreachable;
             return c;
         }
 
@@ -557,7 +562,7 @@ pub fn string(T: type) type {
             };
         }
 
-        // 2. Overriding Value-Tree Parsing (Required for nested/dynamic JSON structures)
+        // Overriding Value-Tree Parsing (Required for nested/dynamic JSON structures)
         pub fn jsonParseFromValue(
             allocator: std.mem.Allocator,
             source: std.json.Value,
@@ -584,7 +589,9 @@ pub fn string(T: type) type {
                 s.a.free(previous);
                 s.raw = null;
             }
-            s.raw = s.a.dupe(T, s.i.items[0..s.i.items.len]) catch unreachable;
+            s.raw = s.a.alloc(T, s.i.items.len) catch unreachable;
+            std.mem.copyForwards(T, s.raw.?, s.i.items[0..s.i.items.len]);
+
             if (s.rawSentinel) |previous| {
                 s.a.free(previous);
                 s.rawSentinel = null;
