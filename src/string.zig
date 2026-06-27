@@ -30,12 +30,27 @@ pub fn string(T: type) type {
             return s;
         }
 
+        pub fn init_substr(s: *const Self, a: std.mem.Allocator, index: usize, count: i64) Self {
+            if (s.i.items.len == 0 or index >= s.i.items.len) return .init(a, s.i.items[0..0]);
+
+            const start = index;
+            const requested_len: usize = if (count == npos) s.i.items.len - start else @intCast(count);
+            const end = std.math.clamp(start + requested_len, start, s.i.items.len);
+            return .init(a, s.i.items[start..end]);
+        }
+
         pub fn from_arrayList(a: std.mem.Allocator, list: std.ArrayList(T)) Self {
             return .init(a, list.items);
         }
 
         pub fn from_slice(a: std.mem.Allocator, buffer: []const T) Self {
             return .init(a, buffer);
+        }
+
+        pub fn from_format(a: std.mem.Allocator, comptime format: []const T, args: anytype) Self {
+            const formatted = std.fmt.allocPrint(a, format, args) catch unreachable;
+            defer a.free(formatted);
+            return .init(a, formatted);
         }
 
         pub fn deinit(s: *Self) void {
@@ -53,11 +68,10 @@ pub fn string(T: type) type {
         pub fn clone(s: *const Self, a: std.mem.Allocator) Self {
             var c = Self{ .a = a, .i = std.ArrayList(T).empty, .raw = null, .rawSentinel = null, ._disposed = false };
 
-            c.raw = a.alloc(T, s.i.items.len) catch unreachable;
+            c.raw = c.a.alloc(T, s.i.items.len) catch unreachable;
             std.mem.copyForwards(T, c.raw.?, s.i.items[0..s.i.items.len]);
 
-            c.rawSentinel = a.allocSentinel(T, s.i.items.len, sentinel) catch unreachable;
-            if (s.rawSentinel) |rawSentinel| c.rawSentinel = a.dupeSentinel(T, rawSentinel, 0) catch unreachable;
+            if (s.rawSentinel) |rawSentinel| c.rawSentinel = c.a.dupeSentinel(T, rawSentinel, 0) catch unreachable;
 
             c.i = s.i.clone(a) catch unreachable;
             return c;
@@ -65,11 +79,11 @@ pub fn string(T: type) type {
 
         //capacity methods
 
-        pub fn size(s: *Self) usize {
+        pub fn size(s: *const Self) usize {
             return s.length();
         }
 
-        pub fn length(s: *Self) usize {
+        pub fn length(s: *const Self) usize {
             return s.i.items.len;
         }
 
@@ -266,7 +280,7 @@ pub fn string(T: type) type {
             return s;
         }
 
-        pub fn find(s: *Self, needle: []const T, index: usize, len: i64) !i64 {
+        pub fn find(s: *const Self, needle: []const T, index: usize, len: i64) !i64 {
             if (index > s.i.items.len) return StringErrors.InvalidArgument;
             if (len > needle.len) return StringErrors.InvalidArgument;
 
@@ -284,8 +298,9 @@ pub fn string(T: type) type {
             return if (found) |value| @intCast(value + index) else @as(i64, npos);
         }
 
-        pub fn rfind(s: *Self, needle: []const T, index: usize) !i64 {
-            const haystack_ = s.i.items[0..std.math.clamp(index + 1, 0, s.i.items.len)];
+        pub fn rfind(s: *const Self, needle: []const T, index: i64) !i64 {
+            const start: usize = if (index == npos) s.i.items.len else @intCast(index);
+            const haystack_ = s.i.items[0..std.math.clamp(start + 1, 0, s.i.items.len)];
             const idx = std.mem.findLast(T, haystack_, needle);
             return if (idx) |i| @as(i64, @intCast(i)) else -1;
         }
@@ -360,7 +375,7 @@ pub fn string(T: type) type {
             return -1;
         }
 
-        pub fn substr(s: *Self, index: usize, count: i64) ![]T {
+        pub fn substr(s: *const Self, index: usize, count: i64) ![]T {
             if (index > s.i.items.len) return StringErrors.ArgumentOutOfRange;
 
             const char_count: usize = if (count == npos) s.i.items.len else @intCast(count);
@@ -596,7 +611,9 @@ pub fn string(T: type) type {
                 s.a.free(previous);
                 s.rawSentinel = null;
             }
-            s.rawSentinel = s.a.dupeSentinel(T, s.i.items[0..s.i.items.len], sentinel) catch unreachable;
+            s.rawSentinel = s.a.allocSentinel(T, s.i.items.len + 1, sentinel) catch unreachable;
+            std.mem.copyForwards(T, s.rawSentinel.?, s.i.items[0..s.i.items.len]);
+            s.rawSentinel.?[s.i.items.len] = sentinel;
         }
     };
 }
